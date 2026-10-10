@@ -1,0 +1,40 @@
+[
+  {
+    "Information": {
+      "id": "quote:7100001",
+      "supplier_id": "sup:70110",
+      "part_id": "part:310010",
+      "quote_date": "2025-01-22",
+      "unit_price": "142.5",
+      "payment_days": "30",
+      "awarded": "true",
+      "remarks": ""
+    },
+    "Source": "data/data/quotes.csv:2",
+    "Priority (Argument wise)": 1
+  },
+  {
+    "Information": {
+      "id": "quote:7100004",
+      "supplier_id": "sup:70110",
+      "part_id": "part:310010",
+      "quote_date": "2025-02-01",
+      "unit_price": "130",
+      "awarded": "false",
+      "future_quote_field": "kept"
+    },
+    "Source": "data/data/quotes.csv:5",
+    "Priority (Argument wise)": "2"
+  },
+  {
+    "Information": {
+      "id": "quote:7100002",
+      "supplier_id": "sup:70140",
+      "part_id": "part:310010",
+      "quote_date": "2025-01-22",
+      "unit_price": "124.2"
+    },
+    "Source": "data/data/quotes.csv:3",
+    "Priority (Argument wise)": 1
+  }
+]

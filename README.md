@@ -2,6 +2,11 @@
 
 Buyer-agent project for the Tacto Negotiation Arena. The repository includes the arena's Python starter kit, case data, and brief. The upstream kit snapshot is from `tacto-ai/negotiation-arena-kit` commit `1b5516bb95ef28e37f69aa446dc62168864bca53`.
 
+## Negotiator MVP components
+
+- [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal.
+- [MVP intelligence](MVP_INTELLIGENCE.md): ingestion and traceable supplier context from the data-analysis team's JSON evidence output.
+
 ## Run the baseline agent
 
 Requires Python 3.12 and `uv`.
