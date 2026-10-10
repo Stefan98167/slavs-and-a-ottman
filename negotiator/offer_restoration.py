@@ -14,7 +14,7 @@ from .response_trades import RESPONSE_TRADE_MARKER
 RESTORE_OFFER_MARKER = "Could you renew your earlier quoted package"
 
 
-def restore_prior_offer(case, offer, events):
+def restore_prior_offer(case, offer, events, supplier_economics=None):
     if offer["status"] != "open" or not offer["acceptable"]:
         return None
     if not any(event.get("from") == "buyer" and RESPONSE_TRADE_MARKER in str(event.get("body", ""))
@@ -36,7 +36,7 @@ def restore_prior_offer(case, offer, events):
             if any(field not in old for field in case["negotiable"]):
                 continue
             terms = {field: deepcopy(old[field]) for field in case["negotiable"]}
-            evaluation = evaluate_deal(case, terms, offer["standard"])
+            evaluation = evaluate_deal(case, terms, offer["standard"], supplier_economics)
             if not evaluation["valid_for_negotiation"]:
                 continue
             cost = evaluation["buyer"]["total_cost"]

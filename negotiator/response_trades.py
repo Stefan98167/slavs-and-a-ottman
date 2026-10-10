@@ -16,7 +16,7 @@ from .response_signal import response_signal
 RESPONSE_TRADE_MARKER = "For this alternative package, we offer a higher price"
 
 
-def response_trade_packages(case, offer, events, invited_fields):
+def response_trade_packages(case, offer, events, invited_fields, supplier_economics=None):
     if not any(event.get("from") == "buyer" and event.get("term_sheets") for event in events):
         return []
     if any(event.get("from") == "buyer" and RESPONSE_TRADE_MARKER in str(event.get("body", ""))
@@ -31,7 +31,7 @@ def response_trade_packages(case, offer, events, invited_fields):
         r"(?:higher|increas\w*).{0,45}\bprice\b|\bprice\b.{0,45}(?:higher|increas\w*)",
         str(message.get("body") or ""), re.I,
     )
-    signal = response_signal(case, events)
+    signal = response_signal(case, events, supplier_economics)
     candidates = []
     for field in case["negotiable"]:
         if field == "unit_price":
@@ -65,21 +65,23 @@ def response_trade_packages(case, offer, events, invited_fields):
             if field == "contract_months" and value > 12 * case["buyer"]["horizon_years"]:
                 continue
             terms = {**deepcopy(current), field: deepcopy(value)}
-            evaluation = evaluate_deal(case, terms, offer["standard"])
+            evaluation = evaluate_deal(case, terms, offer["standard"], supplier_economics)
             if not evaluation["valid_for_negotiation"]:
                 continue
             cost = evaluation["buyer"]["total_cost"]
             benefit = offer["standing_cost"] - cost
             if benefit <= 0:
                 continue
-            higher = evaluate_deal(case, {**terms, "unit_price": current["unit_price"] + 1}, offer["standard"])
+            higher = evaluate_deal(
+                case, {**terms, "unit_price": current["unit_price"] + 1}, offer["standard"], supplier_economics
+            )
             slope = higher["buyer"]["total_cost"] - cost
             if slope <= 0:
                 continue
             terms["unit_price"] = math.floor((current["unit_price"] + benefit / (2 * slope) + 1e-9) * 100) / 100
             if terms["unit_price"] <= current["unit_price"]:
                 continue
-            final = evaluate_deal(case, terms, offer["standard"])
+            final = evaluate_deal(case, terms, offer["standard"], supplier_economics)
             if (not final["valid_for_negotiation"] or final["buyer"]["total_cost"] > offer["reservation_cost"]
                     or final["buyer"]["total_cost"] > offer["standing_cost"] - benefit / 2 + 0.01):
                 continue

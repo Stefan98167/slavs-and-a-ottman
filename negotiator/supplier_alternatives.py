@@ -12,7 +12,7 @@ from .evaluator import evaluate_deal
 ALTERNATIVE_MARKER = "Please make your listed alternative our standing offer"
 
 
-def supplier_alternative_package(case, offer, events):
+def supplier_alternative_package(case, offer, events, supplier_economics=None):
     message = next((event for event in reversed(events) if event.get("from") not in {"buyer", "arena"}), {})
     if message.get("status") != "open":
         return None
@@ -24,7 +24,7 @@ def supplier_alternative_package(case, offer, events):
         terms = sheet.get("terms") or {}
         if set(terms) != set(case["negotiable"]) or terms in already_requested:
             continue
-        evaluated = evaluate_deal(case, terms, offer["standard"])
+        evaluated = evaluate_deal(case, terms, offer["standard"], supplier_economics)
         if not evaluated["valid_for_negotiation"]:
             continue
         cost = evaluated["buyer"]["total_cost"]

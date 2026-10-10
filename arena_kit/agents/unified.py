@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 
 from negotiator.buyer_arguments import price_evidence_reply, source_document_reply
@@ -24,6 +26,7 @@ from negotiator.proposal_safety import finite_number, reservation_cost, select_p
 from negotiator.response_signal import supplier_sentences
 from negotiator.response_trades import RESPONSE_TRADE_MARKER, response_trade_packages
 from negotiator.supplier_alternatives import ALTERNATIVE_MARKER, supplier_alternative_package
+from negotiator.supplier_economics import estimate_supplier_economics
 from negotiator.supplier_evidence import build_thread_supplier_context, context_for_part
 from negotiator.term_repair import REPAIR_MARKER, restoration_packages
 
@@ -60,12 +63,43 @@ class UnifiedAgent:
         self.decision_history = []
         self.package = package
         self.archive = CaseSupplierEvidence(package) if package else None
+        self.supplier_archive_enabled = os.environ.get("SUPPLIER_ARCHIVE_EVIDENCE") == "1"
         self.prepared_case = None
         self.archive_records = {}
         self.evidence_warnings = []
+        self.supplier_economics_enabled = os.environ.get("SUPPLIER_ECONOMICS") == "1"
+        self.supplier_facts = self._load_supplier_facts() if self.supplier_economics_enabled else {}
+
+    @staticmethod
+    def _load_supplier_facts():
+        from ..data import DataPackage
+
+        root = os.environ.get("ARENA_DATA", "data")
+        try:
+            return DataPackage(root).facts
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _supplier_economics(self, case, supplier_id):
+        if not self.supplier_economics_enabled:
+            return None
+        inline_facts = case.get("facts")
+        facts = {**self.supplier_facts, **(inline_facts if isinstance(inline_facts, Mapping) else {})}
+        return estimate_supplier_economics(case, supplier_id, facts)
+
+    def _load_archive(self):
+        from ..data import DataPackage
+
+        root = os.environ.get("ARENA_DATA", "data")
+        try:
+            return CaseSupplierEvidence(DataPackage(root))
+        except (OSError, ValueError, TypeError):
+            return CaseSupplierEvidence()
 
     def prepare(self, case):
         if self.prepared_case != case.get("case_id"):
+            if self.archive is None and self.supplier_archive_enabled:
+                self.archive = self._load_archive()
             self.archive_records, self.evidence_warnings = (
                 self.archive.prepare(case) if self.archive else ({}, [])
             )
@@ -113,7 +147,9 @@ class UnifiedAgent:
                 continue
             if (indicative_alternative(latest(events), case["negotiable"])
                     and can_clarify(events, "alternative")
-                    and not supplier_alternative_package(case, offer, events)):
+                    and not supplier_alternative_package(
+                        case, offer, events, offer.get("supplier_economics")
+                    )):
                 recoveries.append((offer["supplier_id"], "alternative", offer))
                 continue
             progress = _supplier_progress(case, events, offer)
@@ -188,6 +224,7 @@ class UnifiedAgent:
             parts = case.get("parts") or []
             context = self._context(prefix, supplier_id, parts[0] if len(parts) == 1 else None)
             impact, _ = _supplier_claim_cost_impact(context)
+            economics = opening.get("supplier_economics")
             try:
                 plan = plan_packages(case, opening["terms"], (context or {}).get("supplier_profile", {}),
                                      supplier_standard_terms=opening["standard"],
@@ -195,7 +232,7 @@ class UnifiedAgent:
                                      claimed_cost_impact_pct=max(-self.claim_adjustment_cap_pct,
                                                                  min(self.claim_adjustment_cap_pct, impact)))
                 generated = generate_packages(case, opening["terms"], plan["candidate_unit_prices"],
-                                              opening["standard"],
+                                              opening["standard"], supplier_economics=economics,
                                               term_constraints_by_price=plan["term_constraints_by_price"])
                 goal = min((p["evaluation"]["buyer"]["total_cost"] for p in generated["packages"]
                             if p["evaluation"]["buyer"]["total_cost"] <= opening["reservation_cost"]), default=None)
@@ -257,12 +294,13 @@ class UnifiedAgent:
                 if not _compatible_quote_basis(supplier_events):
                     continue
                 standard = standard_terms(supplier_events)
+                economics = self._supplier_economics(case, supplier_id)
                 # Supplier standing sheets may omit fields listed in
                 # `missing_fields`; those close on the supplier PDF's standard
                 # terms. Apply those before evaluator defaults so reservation
                 # checks match the deal the Arena would actually close.
                 effective_terms = _effective_standing_terms(case, terms, standard)
-                evaluation = evaluate_deal(case, effective_terms, standard)
+                evaluation = evaluate_deal(case, effective_terms, standard, economics)
             except (EvaluationInputError, TypeError, ValueError):
                 continue
             cost = evaluation["buyer"]["total_cost"]
@@ -275,6 +313,7 @@ class UnifiedAgent:
                 "offer_id": offer_id,
                 "terms": deepcopy(terms),
                 "standard": standard,
+                "supplier_economics": economics,
                 "evaluation": evaluation,
                 "closed_terms": closed_terms,
                 "standing_cost": cost,
@@ -323,7 +362,9 @@ class UnifiedAgent:
                 _advance_price_ladder(case, plan, events, offer, previous_sheets)
                 recheck_buyer_terms(case, plan, offer["terms"], offer["standard"])
             if not plan["candidate_unit_prices"]:
-                repairs = restoration_packages(case, offer, previous_sheets, events)
+                repairs = restoration_packages(
+                    case, offer, previous_sheets, events, offer.get("supplier_economics")
+                )
                 generated = {"packages": repairs, "selection_policy": "bounded term restoration"}
                 plan["term_restoration"] = bool(repairs)
                 plan["trade_hypotheses"] = []
@@ -333,6 +374,7 @@ class UnifiedAgent:
                     offer["terms"],
                     plan["candidate_unit_prices"],
                     offer["standard"],
+                    supplier_economics=offer.get("supplier_economics"),
                     term_constraints_by_price=plan["term_constraints_by_price"],
                 )
         except (PackageInputError, EvaluationInputError, ValueError):
@@ -354,7 +396,10 @@ class UnifiedAgent:
             packages = [package for package in packages if _terms_key(package["terms"]) not in prior_terms]
         negligible = max(0.01, offer["standing_cost"] * self.min_improvement_pct / 100)
         if not packages or packages[0]["evaluation"]["buyer"]["total_cost"] >= offer["standing_cost"] - negligible:
-            responses = response_trade_packages(case, offer, events, _supplier_invited_terms(latest(events)))
+            responses = response_trade_packages(
+                case, offer, events, _supplier_invited_terms(latest(events)),
+                offer.get("supplier_economics"),
+            )
             if responses:
                 packages = responses
                 generated = {"packages": responses, "selection_policy": "bounded response trade"}
@@ -364,14 +409,16 @@ class UnifiedAgent:
         # A supplier's own fully specified alternative is stronger evidence
         # than another hypothetical discount. Confirm it before it disappears
         # from a later reply; only the primary standing ID is directly accepted.
-        if alternative := supplier_alternative_package(case, offer, events):
+        if alternative := supplier_alternative_package(
+            case, offer, events, offer.get("supplier_economics")
+        ):
             packages = [alternative]
             generated = {"packages": packages, "selection_policy": "confirm supplier structured alternative"}
             plan["supplier_alternative"] = True
             plan["response_trade"] = False
             plan["term_restoration"] = False
             plan["trade_hypotheses"] = []
-        if restored := restore_prior_offer(case, offer, events):
+        if restored := restore_prior_offer(case, offer, events, offer.get("supplier_economics")):
             if not plan.get("supplier_alternative") or restored["evaluation"]["buyer"]["total_cost"] < min(
                     p["evaluation"]["buyer"]["total_cost"] for p in packages):
                 packages = [restored]
@@ -381,7 +428,9 @@ class UnifiedAgent:
         if not packages:
             return None
         considered = deepcopy(packages)
-        packages, excluded = select_proposal(case, offer, packages, events, ceiling)
+        packages, excluded = select_proposal(
+            case, offer, packages, events, ceiling, offer.get("supplier_economics")
+        )
         if not packages:
             return None
         plan["selection_audit"] = {"considered": considered, "excluded": excluded,
@@ -827,9 +876,15 @@ def _advance_price_ladder(case, plan, events, offer, previous_sheets):
     prior_standard = standard_terms([event for event in events[:prior_index + 1]
                                     if event.get("from") not in {"buyer", "arena"}])
     try:
-        prior = evaluate_deal(case, _effective_standing_terms(case, supplier_terms[-2], prior_standard), prior_standard)
+        economics = offer.get("supplier_economics")
+        prior = evaluate_deal(
+            case, _effective_standing_terms(case, supplier_terms[-2], prior_standard),
+            prior_standard, economics,
+        )
         current_terms = {field: offer["closed_terms"][field] for field in case["negotiable"]}
-        higher = evaluate_deal(case, {**current_terms, "unit_price": current + 1}, offer["standard"])
+        higher = evaluate_deal(
+            case, {**current_terms, "unit_price": current + 1}, offer["standard"], economics
+        )
         slope = higher["buyer"]["total_cost"] - offer["standing_cost"]
         benefit = prior["buyer"]["total_cost"] - offer["standing_cost"]
         repaired = not prior["buyer"]["must_haves_ok"] and offer["acceptable"]
@@ -1039,7 +1094,7 @@ def _supplier_progress(case, events, current_offer):
             case, previous_terms, current_offer["standard"]
         )
         previous_evaluation = evaluate_deal(
-            case, effective_previous_terms, current_offer["standard"]
+            case, effective_previous_terms, current_offer["standard"], current_offer.get("supplier_economics")
         )
     except (EvaluationInputError, TypeError, ValueError):
         return False

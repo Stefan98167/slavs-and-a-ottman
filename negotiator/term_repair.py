@@ -13,7 +13,7 @@ from .evaluator import evaluate_deal
 REPAIR_MARKER = "In exchange for restoring the earlier requested term"
 
 
-def restoration_packages(case, offer, previous_sheets, events):
+def restoration_packages(case, offer, previous_sheets, events, supplier_economics=None):
     if any(event.get("from") == "buyer" and REPAIR_MARKER in str(event.get("body", ""))
            for event in events):
         return []
@@ -31,14 +31,16 @@ def restoration_packages(case, offer, previous_sheets, events):
             if field == "unit_price" or field not in prior or prior[field] == current[field]:
                 continue
             terms = {**deepcopy(current), field: deepcopy(prior[field])}
-            evaluation = evaluate_deal(case, terms, standard)
+            evaluation = evaluate_deal(case, terms, standard, supplier_economics)
             if not evaluation["valid_for_negotiation"]:
                 continue
             cost = evaluation["buyer"]["total_cost"]
             benefit = offer["standing_cost"] - cost
             if benefit <= 0:
                 continue
-            slope = evaluate_deal(case, {**terms, "unit_price": terms["unit_price"] + 1}, standard)
+            slope = evaluate_deal(
+                case, {**terms, "unit_price": terms["unit_price"] + 1}, standard, supplier_economics
+            )
             per_euro = slope["buyer"]["total_cost"] - cost
             if per_euro <= 0:
                 continue
@@ -46,7 +48,7 @@ def restoration_packages(case, offer, previous_sheets, events):
             terms["unit_price"] = math.floor((ceiling + 1e-9) * 100) / 100
             if terms["unit_price"] <= current["unit_price"]:
                 continue  # A reciprocal trade must actually give something back.
-            evaluation = evaluate_deal(case, terms, standard)
+            evaluation = evaluate_deal(case, terms, standard, supplier_economics)
             final_cost = evaluation["buyer"]["total_cost"]
             if (not evaluation["valid_for_negotiation"] or final_cost > offer["reservation_cost"]
                     or final_cost > offer["standing_cost"] - benefit / 2 + 0.01):

@@ -27,7 +27,7 @@ def reservation_cost(case, evaluation):
     return round(bound, 2) if math.isfinite(bound) else 0.0
 
 
-def select_proposal(case, offer, packages, events, ceiling=None):
+def select_proposal(case, offer, packages, events, ceiling=None, supplier_economics=None):
     """Select one new package; never give back an available safe deal's value."""
     seen = {json.dumps(sheet.get("terms"), sort_keys=True) for event in events
             if event.get("from") == "buyer" for sheet in event.get("term_sheets", [])}
@@ -39,7 +39,7 @@ def select_proposal(case, offer, packages, events, ceiling=None):
     retained, excluded = [], []
     for package in packages:
         terms = package["terms"]
-        check = evaluate_deal(case, terms, offer["standard"])
+        check = evaluate_deal(case, terms, offer["standard"], supplier_economics)
         reason = None
         if set(terms) != set(case["negotiable"]) or not check["valid_for_negotiation"]:
             reason = "invalid or incomplete package"

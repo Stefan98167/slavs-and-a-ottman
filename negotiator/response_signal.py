@@ -16,7 +16,7 @@ def supplier_sentences(message):
             if not re.search(r'["“”>]|\b(?:you said|you wrote|hypothetically|suppose|if we|might)\b', sentence, re.I)]
 
 
-def response_signal(case, events):
+def response_signal(case, events, supplier_economics=None):
     """One explicit freeze or three comparable response observations.
 
     The 0.25% threshold is an uncalibrated exploration trigger, not a floor.
@@ -54,7 +54,7 @@ def response_signal(case, events):
             if any(k not in terms for k in case["negotiable"]):
                 observations = []
                 continue
-            evaluation = evaluate_deal(case, terms, standard)
+            evaluation = evaluate_deal(case, terms, standard, supplier_economics)
             if not evaluation["valid_for_negotiation"]:
                 observations = []
                 continue
