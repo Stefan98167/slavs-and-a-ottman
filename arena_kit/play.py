@@ -241,6 +241,83 @@ def closing_move(case, threads):
     return {"supplier_id": best[1], "message": {"action": {"type": "accept", "term_sheet_id": best[2]}}}
 
 
+def _current_threads(table, threads):
+    """Refresh server-owned thread state when possible, including timeout-created offers."""
+    refresh = getattr(table, "refresh_threads", None)
+    if not callable(refresh):
+        return threads
+    return refresh(threads)
+
+
+def _close_decision(agent, case, threads):
+    """Ask the agent how to close, falling back to the contract-safe generic closer."""
+    closer = getattr(agent, "close", None)
+    try:
+        decision = closer(case, threads) if callable(closer) else closing_move(case, threads)
+        sid = decision.get("supplier_id")
+        message = decision.get("message", {})
+        action = message.get("action", {})
+        if action.get("type") == "accept":
+            current_id = standing(threads.get(sid, []))[0] if sid in threads and threads[sid] else None
+            if not current_id or action.get("term_sheet_id") != current_id:
+                raise ValueError("close decision refers to a non-standing offer")
+        if action.get("type") not in {"accept", "walk_away"}:
+            raise ValueError("close decision is not an accept or walk-away")
+        return decision
+    except Exception:
+        log.exception("agent close decision failed; using the generic closer")
+        if live_threads(threads):
+            return closing_move(case, threads)
+        return {"supplier_id": next(iter(threads)), "message": {"action": {"type": "walk_away"}}}
+
+
+def _recover_and_close(table, case, threads, agent, cause, *, retry_limit=2):
+    """Recover an open case after a decision or HTTP failure, then close it from fresh state."""
+    log.error("case recovery started after %r at %s", cause, time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    for attempt in range(retry_limit):
+        try:
+            threads = _current_threads(table, threads)
+        except Exception:
+            log.exception("could not refresh threads during recovery attempt %s", attempt + 1)
+        if getattr(table, "done", None):
+            return table.done
+        if not live_threads(threads):
+            try:
+                return table.result()
+            except Exception:
+                log.exception("case state unavailable after recovery refresh")
+        decision = _close_decision(agent, case, threads)
+        sid, message = decision["supplier_id"], decision["message"]
+        try:
+            return table.close(sid, message)
+        except ArenaError as exc:
+            if exc.status == 409:
+                try:
+                    missed = table.missed(sid, exc)
+                    if "result" in missed:
+                        return missed["result"]
+                except Exception:
+                    log.exception("could not reconcile recovery close conflict")
+            elif not (exc.status == 422 and message.get("action", {}).get("type") == "accept"):
+                log.exception("recovery close rejected with HTTP %s", exc.status)
+            if attempt + 1 < retry_limit:
+                log.warning("refreshing and retrying recovery close after HTTP %s", exc.status)
+                continue
+            log.critical("recovery close failed twice; session may remain open", exc_info=True)
+            break
+        except Exception:
+            if attempt + 1 < retry_limit:
+                log.exception("recovery close raised; refreshing and retrying once")
+                continue
+            log.critical("recovery close failed twice; session may remain open", exc_info=True)
+            break
+    try:
+        return table.result()
+    except Exception:
+        log.critical("could not read result after recovery; session may remain open", exc_info=True)
+        raise
+
+
 def _send_batch(table, decisions):
     """Service independent supplier threads concurrently; never send a close in a batch."""
     suppliers = [item["supplier_id"] for item in decisions]
@@ -269,32 +346,40 @@ def play(table, case_id, agent, deadline=None):
     case, threads = table.open(case_id)
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
-    for supplier_id, events in threads.items():
-        for m in events:
-            fetch_documents(table, m, supplier_id)
+    try:
+        for supplier_id, events in threads.items():
+            for m in events:
+                fetch_documents(table, m, supplier_id)
+    except Exception as exc:
+        return _recover_and_close(table, case, threads, agent, exc)
     slowest = 0.0  # the longest round so far: decision + the supplier's reply
     while live_threads(threads):
         t0 = time.monotonic()
         cap = deadline() if callable(deadline) else deadline
-        if cap and time.time() > cap - max(CLOSE_BEFORE_CAP_S, slowest + ROUND_MARGIN_S):
-            log.info("%s: the wave's cap is near - closing", case_id)
-            close = getattr(agent, "close", None)
-            decision = close(case, threads) if callable(close) else closing_move(case, threads)
-        else:
-            batch = getattr(agent, "decide_batch", None)
-            decisions = batch(case, threads) if callable(batch) else [agent.decide(case, threads)]
-            if len(decisions) > 1:
-                ended_result = None
-                for sid, msg, reply in _send_batch(table, decisions):
-                    if "result" in reply:
-                        ended_result = reply["result"]
-                    else:
-                        threads[sid] += [{**msg, "from": "buyer"}, reply]
-                if ended_result is not None:
-                    return ended_result
-                slowest = max(slowest, time.monotonic() - t0)
-                continue
-            decision = decisions[0]
+        try:
+            if cap and time.time() > cap - max(CLOSE_BEFORE_CAP_S, slowest + ROUND_MARGIN_S):
+                log.info("%s: the wave's cap is near - closing", case_id)
+                decision = _close_decision(agent, case, threads)
+            else:
+                batch = getattr(agent, "decide_batch", None)
+                decisions = batch(case, threads) if callable(batch) else [agent.decide(case, threads)]
+                if len(decisions) > 1:
+                    ended_result = None
+                    try:
+                        for sid, msg, reply in _send_batch(table, decisions):
+                            if "result" in reply:
+                                ended_result = reply["result"]
+                            else:
+                                threads[sid] += [{**msg, "from": "buyer"}, reply]
+                    except Exception as exc:
+                        return _recover_and_close(table, case, threads, agent, exc)
+                    if ended_result is not None:
+                        return ended_result
+                    slowest = max(slowest, time.monotonic() - t0)
+                    continue
+                decision = decisions[0]
+        except Exception as exc:
+            return _recover_and_close(table, case, threads, agent, exc)
         if (took := time.monotonic() - t0) > MOVE_LIMIT_S * 0.75:
             log.warning("decision took %.1fs - the limit is %ss per message", took, MOVE_LIMIT_S)
         sid, msg = decision["supplier_id"], decision["message"]
@@ -315,12 +400,18 @@ def play(table, case_id, agent, deadline=None):
             reply = table.send(sid, msg)
         except ArenaError as e:
             if e.status != 409:
-                raise
+                one_retry = e.status == 422 and msg.get("action", {}).get("type") == "accept"
+                return _recover_and_close(table, case, threads, agent, e, retry_limit=1 if one_retry else 2)
             log.info("%s: %s", sid, e.detail)
-            reply = table.missed(sid, e)  # e.g. late, or the thread or the case has ended
+            try:
+                reply = table.missed(sid, e)  # e.g. late, or the thread or the case has ended
+            except Exception as exc:
+                return _recover_and_close(table, case, threads, agent, exc)
             if msg.get("action") and "result" not in reply:  # the case goes on: decide again
                 threads[sid].append(fetch_documents(table, reply, sid))
                 continue
+        except Exception as exc:
+            return _recover_and_close(table, case, threads, agent, exc)
         if "result" in reply:  # the reply ended the case, e.g. the last supplier walked away
             return reply["result"]
         threads[sid] += [{**msg, "from": "buyer"}, fetch_documents(table, reply, sid)]
