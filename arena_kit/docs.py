@@ -22,16 +22,16 @@ SECTIONS = {
     "Terms fixed by your enquiry": "fixed",
     "Agreed terms": "agreed",
 }
-CLAUSE = re.compile(r"(\S+), (\d+)% material, deadband ([\d.]+) %, base (\S+)")
+CLAUSE = re.compile(r"(\S+), (\d+(?:[.,]\d+)?)% material, deadband ([\d.,]+) %, base (\S+)")
 
 
 def read_document(name, data):
     """The text of an attachment: PDF pages, XLSX rows (formulas as written), or plain text."""
-    if name.endswith(".pdf"):
+    if name.lower().endswith(".pdf"):
         from pypdf import PdfReader
 
-        return "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(data)).pages)
-    if name.endswith(".xlsx"):
+        return "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(data)).pages)
+    if name.lower().endswith(".xlsx"):
         from openpyxl import load_workbook
 
         wb = load_workbook(io.BytesIO(data))
@@ -51,13 +51,14 @@ def _value(field, text):
         series, share, deadband, base = m.groups()
         return {
             "series": series,
-            "material_share": int(share) / 100,
-            "deadband_pct": float(deadband),
+            "material_share": float(share.replace(",", ".")) / 100,
+            "deadband_pct": float(deadband.replace(",", ".")),
             "base_month": base,
         }
     if field in ("effective_date", "incoterm"):
         return text
-    return float(text) if "eur" in field or field == "unit_price" else int(float(text))
+    number = text.replace(" ", "").replace(",", ".")
+    return float(number) if "eur" in field or field == "unit_price" else int(float(number))
 
 
 def quote_terms(text):

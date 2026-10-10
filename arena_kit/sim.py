@@ -22,6 +22,7 @@ import json
 import re
 import threading
 import time
+from copy import deepcopy
 from pathlib import Path
 
 from .cost import closing_terms, cost_breakdown, must_haves_ok, score, total_cost
@@ -699,6 +700,53 @@ def create_app(sim):
 def load_cases(folder=CASES):
     found = (json.loads(p.read_text(encoding="utf-8")) for p in sorted(Path(folder).glob("*.json")))
     return {c["case_id"]: c for c in found}
+
+
+class SimTable:
+    """The existing play() table interface over Sim, entirely in process.
+
+    No HTTP server, port, credentials or network calls. Return copies just as
+    HTTP deserialization would, so runner history cannot mutate simulator state.
+    """
+
+    def __init__(self, sim=None):
+        self.sim = sim or Sim(load_cases(), no_clock=True)
+        self.team, self.session_id = "local-simulator", None
+        self.sim.teams.setdefault(self.team, "Local simulation")
+
+    def _call(self, method, *args):
+        from .client import ArenaError
+
+        try:
+            return deepcopy(method(self.team, *args))
+        except Fail as exc:
+            raise ArenaError(exc.status, exc.detail) from exc
+
+    def open(self, case_id):
+        opened = self._call(self.sim.open, case_id)
+        self.session_id = opened["session_id"]
+        return opened["case"], opened["threads"]
+
+    def send(self, supplier_id, message):
+        return self._call(self.sim.message, self.session_id, supplier_id, message)
+
+    def close(self, supplier_id, message):
+        reply = self.send(supplier_id, message)
+        return reply.get("result", reply)
+
+    def attachment(self, attachment_id):
+        return self._call(self.sim.attachment, self.session_id, attachment_id)[0]
+
+    def result(self):
+        state = self._call(self.sim.state, self.session_id)
+        return state.get("result") or state
+
+    def missed(self, supplier_id, error):
+        if self._call(self.sim.state, self.session_id)["status"] == "ended":
+            return {"result": self.result()}
+        # This in-process runner has no clock deadline by default. Unexpected
+        # conflicts should surface rather than silently replaying stale offers.
+        raise error
 
 
 def main(argv=None):

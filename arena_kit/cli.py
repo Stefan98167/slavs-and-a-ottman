@@ -27,12 +27,18 @@ def load_env(path=".env"):
 
 
 def agent_factory(name, data):
-    from .agents import AdvancedAgent, LLMAgent, NaiveAgent, llm_from_env
+    from .agents import AdvancedAgent, LLMAgent, NaiveAgent, PackageAgent, llm_from_env
 
+    if name == "supplier":
+        from negotiator import SupplierContextAgent
+
+        return SupplierContextAgent
     if name == "naive":
         return NaiveAgent
     if name == "advanced":
         return AdvancedAgent
+    if name == "packages":
+        return PackageAgent
     package = None
     if data:
         from .data import DataPackage
@@ -67,14 +73,18 @@ def main(argv=None):
     c.add_argument("--set", **sets)
     p = sub.add_parser("play", help="play one case")
     p.add_argument("case_id")
-    p.add_argument("--agent", default="naive", choices=["naive", "advanced", "llm"])
+    p.add_argument("--agent", default="supplier", choices=["supplier", "packages", "advanced", "naive", "llm"])
     p.add_argument("--data", **data)
     a = sub.add_parser("run", help="play every case of a set in parallel")
     a.add_argument("--set", **sets)
-    a.add_argument("--agent", default="naive", choices=["naive", "advanced", "llm"])
+    a.add_argument("--agent", default="supplier", choices=["supplier", "packages", "advanced", "naive", "llm"])
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed")
+    s = sub.add_parser("simulate", help="run a negotiation entirely locally, without HTTP or model calls")
+    s.add_argument("case_id", nargs="?", default="case:S01")
+    s.add_argument("--agent", choices=["supplier", "packages", "advanced", "naive"], default="supplier")
+    s.add_argument("--out", type=Path, help="Save result and transcript as JSON")
     d = sub.add_parser("data", help="download and unpack the data (package, Sunday release once public)")
     d.add_argument("--out", default="data", help="folder to unpack into")
     sub.add_parser("me", help="your team: practice quota used and left, best score per case")
@@ -93,6 +103,34 @@ def main(argv=None):
         from .mcp_server import main as serve
 
         return serve(args.data)
+    if args.cmd == "simulate":
+        from .sim import SimTable
+
+        try:
+            agent = agent_factory(args.agent, None)()
+            table = SimTable()
+            result = play(table, args.case_id, agent)
+            session = table.sim.sessions[table.session_id]
+            output = {
+                "mode": "simulation",
+                "input_policy": (
+                    "supplier_only"
+                    if args.agent == "supplier"
+                    else "buyer_cost_packages"
+                    if args.agent in ("packages", "advanced")
+                    else "legacy"
+                ),
+                "case_id": args.case_id,
+                "result": result,
+                "threads": {sid: thread["messages"] for sid, thread in session["threads"].items()},
+                "decisions": getattr(agent, "decision_history", []),
+            }
+            if args.out:
+                args.out.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(json.dumps(summary(result), indent=2))
+        except (ArenaError, OSError, ValueError) as exc:
+            ap.error(str(exc))
+        return
     client = ArenaClient()
     if args.cmd == "register":
         out = client.register(args.team_name, args.event_code)
@@ -122,13 +160,13 @@ def main(argv=None):
         table = RemoteTable(client)
         try:
             result = play(table, args.case_id, agent_factory(args.agent, args.data)())
-        except ArenaError as e:  # e.g. not hosted, the quota, a paused key: the arena says why
+        except ArenaError as e:
             raise SystemExit(str(e)) from None
         print(json.dumps(summary(result), indent=2))
         replay = client.session(table.session_id).get("replay_url")
-        if replay:  # the supplier's reasons, move by move: read it, improve, play again
+        if replay:
             print(f"replay: {os.environ['ARENA_URL'].rstrip('/')}{replay}")
-    elif args.set == "final":  # waits for each wave and plays its cases within the cap
+    elif args.set == "final":
         out = play_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10))
     else:
         ids = [case["case_id"] for case in hosted(client.cases(args.set))]
@@ -142,9 +180,9 @@ def main(argv=None):
         for case_id, result in out.items():
             print(case_id, result if isinstance(result, Exception) else summary(result))
         scores = {c: r.get("score") for c, r in out.items() if isinstance(r, dict)}
-        if args.set == "final" and scores:  # points so far: each wave 0-100, their sum, as the board counts
+        if args.set == "final" and scores:
             waves = {}
-            for case in client.cases("final"):  # your own case list: which wave each case was in
+            for case in client.cases("final"):
                 waves.setdefault(case["wave"], []).append(scores.get(case["case_id"]) or 0)
             points = {n: round(100 * statistics.mean(v), 1) for n, v in sorted(waves.items())}
             print(f"waves: {points}  points so far: {round(sum(points.values()), 1)} (the board is the record)")

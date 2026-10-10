@@ -3,12 +3,14 @@ final) or `arena-sim`, the local contract simulator. Both speak the same API.
 
 An agent is any object with `decide(case, threads) -> {"supplier_id": ..., "message": {...}}`:
   threads: {supplier_id: [message, ...]} - every e-mail so far, both directions, in order;
-           supplier attachments carry their text under "text" (see `docs.read_document`).
+           supplier attachments carry readable `text`; CSVs also carry extracted `csv_records`.
+           The supplier agent normalizes email claims and PDF/CSV evidence into one context.
   message: subject, body, up to 3 term sheets, refs - or an "action" that closes the case:
            {"type": "accept", "term_sheet_id": ...} or {"type": "walk_away"}.
 """
 
 import functools
+import io
 import logging
 import re
 import threading
@@ -115,11 +117,59 @@ def moves_left(case, events):
     return case.get("round_limit", 10) - sum(m.get("from") == "buyer" for m in events)
 
 
-def fetch_documents(table, message):
-    """Download every attachment of a supplier message and add its text."""
+class _NamedBytesIO(io.BytesIO):
+    """Bytes stream that lets the CSV extractor retain a useful attachment source name."""
+
+    def __init__(self, data, name):
+        super().__init__(data)
+        self.name = name
+
+
+def _supplier_attachment_source(name):
+    """Use a safe source label while keeping the supplier's original name on the attachment."""
+    basename = str(name or "upload.csv").replace("\\", "/").rsplit("/", 1)[-1]
+    return f"supplier_attachment_{basename}"
+
+
+def _parse_csv_attachment(data, name, supplier_id=None):
+    from .quote_extract import extract, extract_supplier_context
+
+    stream = _NamedBytesIO(data, _supplier_attachment_source(name))
+    if supplier_id:
+        parsed = extract_supplier_context(stream, supplier_id=supplier_id)
+        return parsed["records"], {"supplier_id": supplier_id, "contexts": parsed["contexts"]}
+    return extract(stream), None
+
+
+def fetch_documents(table, message, supplier_id=None):
+    """Download supplier attachments, expose readable text, and parse CSV evidence.
+
+    CSV attachments get ``csv_records`` plus a supplier-scoped ``supplier_context``
+    when the caller supplies the thread's supplier ID; PDFs get readable text. The
+    supplier agent combines these with supplier messages into one sourced context.
+    CSV parse failures remain on the attachment as ``csv_parse_error``.
+    """
     for att in message.get("attachments") or []:
+        name = att.get("name", "")
+        is_supplier_message = message.get("from") not in {"buyer", "arena"}
+        attachment_type = str(att.get("type", "")).lower()
+        is_csv = is_supplier_message and (
+            str(name).lower().endswith(".csv") or attachment_type in {"csv", "text/csv"}
+        )
+        raw = None
         if att.get("attachment_id") and "text" not in att:
-            att["text"] = read_document(att["name"], table.attachment(att["attachment_id"]))
+            raw = table.attachment(att["attachment_id"])
+            att["text"] = read_document(name, raw)
+        needs_context = bool(supplier_id) and not att.get("supplier_context")
+        if is_csv and ("csv_records" not in att or needs_context):
+            try:
+                source = raw if raw is not None else att.get("text", "").encode("utf-8")
+                att["csv_records"], att["supplier_context"] = _parse_csv_attachment(
+                    source, name, supplier_id=supplier_id
+                )
+                att.pop("csv_parse_error", None)
+            except (UnicodeError, ValueError, TypeError) as exc:
+                att["csv_parse_error"] = str(exc)
     return message
 
 
@@ -145,16 +195,17 @@ def play(table, case_id, agent, deadline=None):
     case, threads = table.open(case_id)
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
-    for events in threads.values():
+    for supplier_id, events in threads.items():
         for m in events:
-            fetch_documents(table, m)
+            fetch_documents(table, m, supplier_id)
     slowest = 0.0  # the longest round so far: decision + the supplier's reply
     while live_threads(threads):
         t0 = time.monotonic()
         cap = deadline() if callable(deadline) else deadline
         if cap and time.time() > cap - max(CLOSE_BEFORE_CAP_S, slowest + ROUND_MARGIN_S):
             log.info("%s: the wave's cap is near - closing", case_id)
-            decision = closing_move(case, threads)
+            close = getattr(agent, "close", None)
+            decision = close(case, threads) if callable(close) else closing_move(case, threads)
         else:
             decision = agent.decide(case, threads)
         if (took := time.monotonic() - t0) > MOVE_LIMIT_S * 0.75:
@@ -171,11 +222,11 @@ def play(table, case_id, agent, deadline=None):
             log.info("%s: %s", sid, e.detail)
             reply = table.missed(sid, e)  # e.g. late, or the thread or the case has ended
             if msg.get("action") and "result" not in reply:  # the case goes on: decide again
-                threads[sid].append(fetch_documents(table, reply))
+                threads[sid].append(fetch_documents(table, reply, sid))
                 continue
         if "result" in reply:  # the reply ended the case, e.g. the last supplier walked away
             return reply["result"]
-        threads[sid] += [{**msg, "from": "buyer"}, fetch_documents(table, reply)]
+        threads[sid] += [{**msg, "from": "buyer"}, fetch_documents(table, reply, sid)]
         slowest = max(slowest, time.monotonic() - t0)
         log.info("%s %s %s", sid, reply.get("status"), standing(threads[sid])[1])
     return table.result()

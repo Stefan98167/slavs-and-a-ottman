@@ -53,9 +53,23 @@ Reply with ONE JSON object and nothing else:
 
 def llm_from_env():
     """LLM_PROVIDER=anthropic (Anthropic SDK) or openai (any OpenAI-compatible endpoint)."""
-    provider, model = os.environ.get("LLM_PROVIDER", "openai"), os.environ["LLM_MODEL"]
+    provider = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
+    model = os.environ.get("LLM_MODEL", "").strip()
+    if not model:
+        raise ValueError(
+            "LLM_MODEL is missing. Set it to a model available at your LLM provider "
+            "in .env or your shell. Also configure LLM_PROVIDER and that provider's "
+            "endpoint/credentials. See README.md: LLM-generated extraction priorities."
+        )
+    if provider not in {"anthropic", "openai"}:
+        raise ValueError("LLM_PROVIDER must be 'anthropic' or 'openai' (including compatible local servers)")
     if provider == "anthropic":
-        import anthropic
+        if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            raise ValueError("Set ANTHROPIC_API_KEY for LLM_PROVIDER=anthropic")
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise ValueError("Anthropic SDK is missing. Install it with: python -m pip install anthropic") from exc
 
         client = anthropic.Anthropic(timeout=45.0)
         extra = {"output_config": {"effort": e}} if (e := os.environ.get("LLM_EFFORT")) else {}
@@ -72,6 +86,8 @@ def llm_from_env():
 
         return complete
     base = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    if not base:
+        raise ValueError("LLM_BASE_URL must be a nonempty LLM endpoint URL")
     headers = {"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', '')}"}
 
     def complete(system, user):
