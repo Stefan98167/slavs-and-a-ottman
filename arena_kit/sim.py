@@ -711,7 +711,7 @@ class SimTable:
 
     def __init__(self, sim=None):
         self.sim = sim or Sim(load_cases(), no_clock=True)
-        self.team, self.session_id = "local-dummy", None
+        self.team, self.session_id = "local-simulator", None
         self.sim.teams.setdefault(self.team, "Local simulation")
 
     def _call(self, method, *args):

@@ -121,6 +121,75 @@ def extract(csvs, *, delimiter=None, encoding="utf-8-sig", priority="heuristic",
     return result
 
 
+def extract_supplier_context(csvs, *, supplier_id=None, part_id=None, delimiter=None,
+                            encoding="utf-8-sig", priority="heuristic", complete=None,
+                            priority_context=None, progress=None):
+    """Extract supplier CSVs and pass their records through the intelligence engine.
+
+    ``supplier_id`` and ``part_id`` are negotiation identities supplied by the caller,
+    not guessed from names or vendor-specific IDs in a supplier file. Multiple parts
+    produce separate contexts. For ambiguous part data, pass an explicit part scope.
+    The returned object contains the original extracted rows and auditable contexts.
+    """
+    from negotiator.intelligence import (
+        EvidenceInputError,
+        bind_evidence_scope,
+        build_supplier_context,
+        load_evidence,
+    )
+
+    records = extract(csvs, delimiter=delimiter, encoding=encoding, priority=priority,
+                      complete=complete, priority_context=priority_context, progress=progress)
+    evidence = load_evidence(records)
+    if supplier_id is None:
+        raise EvidenceInputError("supplier_id from the live negotiation thread is required for context output")
+    if not isinstance(supplier_id, str) or not supplier_id.strip():
+        raise EvidenceInputError("supplier_id must be a non-empty string")
+
+    # A supplier's own identifiers are not necessarily Arena identities. The
+    # uploaded attachment is scoped by its live thread; preserve conflicting CSV
+    # identifiers as evidence, then bind the live identity for context grouping.
+    for record in evidence:
+        information = record["data"]
+        csv_supplier_id = record.get("supplier_id")
+        if csv_supplier_id not in (None, supplier_id):
+            information["supplier_reported_supplier_id"] = csv_supplier_id
+            information.pop("supplier_id", None)
+            record["supplier_id"] = None
+        csv_part_id = record.get("part_id")
+        if part_id is not None and csv_part_id not in (None, part_id):
+            information["supplier_reported_part_id"] = csv_part_id
+            information.pop("part_id", None)
+            record["part_id"] = None
+
+    try:
+        evidence = bind_evidence_scope(evidence, supplier_id, part_id)
+    except EvidenceInputError as exc:
+        raise ValueError(str(exc)) from exc
+
+    parts = {record.get("part_id") for record in evidence if record.get("part_id")}
+    has_unscoped_part = any(not record.get("part_id") for record in evidence)
+    if part_id is not None:
+        contexts = [build_supplier_context(evidence, supplier_id, part_id)]
+    elif len(parts) > 1:
+        if has_unscoped_part:
+            raise EvidenceInputError(
+                "CSV rows identify multiple parts and some rows have no part ID; pass part_id to scope this upload"
+            )
+        contexts = [build_supplier_context(evidence, supplier_id, part)
+                    for part in sorted(parts, key=str)]
+    else:
+        inferred_part = next(iter(parts), None)
+        contexts = [build_supplier_context(evidence, supplier_id, inferred_part)]
+
+    return {
+        "schema": "supplier_context_v1",
+        "supplier_id": supplier_id,
+        "records": records,
+        "contexts": contexts,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csvs", nargs="+", type=Path)
@@ -128,20 +197,33 @@ def main():
     parser.add_argument("--encoding", default="utf-8-sig")
     parser.add_argument("--priority", choices=["heuristic", "llm"], default="heuristic")
     parser.add_argument("--priority-context", help="Negotiation context used by the LLM ranker")
+    parser.add_argument("--context", action="store_true",
+                        help="also run the extracted supplier rows through negotiator.intelligence")
+    parser.add_argument("--supplier-id", help="supplier identity from the live negotiation thread (required with --context)")
+    parser.add_argument("--part-id", help="optional part identity from the live negotiation thread")
     args = parser.parse_args()
     if args.priority == "llm":
         from .cli import load_env
 
         load_env()
     try:
-        records = extract(args.csvs, delimiter=args.delimiter, encoding=args.encoding,
-                          priority=args.priority, priority_context=args.priority_context,
-                          progress=lambda message: print(message, file=sys.stderr, flush=True))
+        options = dict(delimiter=args.delimiter, encoding=args.encoding, priority=args.priority,
+                       priority_context=args.priority_context,
+                       progress=lambda message: print(message, file=sys.stderr, flush=True))
+        if args.context:
+            records = extract_supplier_context(args.csvs, supplier_id=args.supplier_id,
+                                               part_id=args.part_id, **options)
+        else:
+            if args.supplier_id or args.part_id:
+                parser.error("--supplier-id and --part-id require --context")
+            records = extract(args.csvs, **options)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     json.dump(records, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
-    print(f"Done: {len(records)} records written as JSON to stdout.", file=sys.stderr, flush=True)
+    count = len(records["records"]) if isinstance(records, dict) else len(records)
+    output_kind = "supplier context" if isinstance(records, dict) else "records"
+    print(f"Done: {count} {output_kind} written as JSON to stdout.", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

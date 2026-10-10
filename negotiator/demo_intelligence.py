@@ -1,4 +1,4 @@
-"""Print supplier context from the analysis team's JSON export."""
+"""Print supplier context from explicitly supplied extracted supplier records."""
 
 from __future__ import annotations
 
@@ -8,14 +8,11 @@ from pathlib import Path
 
 from negotiator.intelligence import build_supplier_context, load_evidence
 
-DEFAULT_INPUT = Path("/home/stefan/Downloads/output.json")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", nargs="?", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--supplier-id", help="Supplier to inspect (defaults to the first usable record)")
-    parser.add_argument("--part-id", help="Optional part filter (defaults to the first usable record's part)")
+    parser.add_argument("input", type=Path, help="JSON array from the supplier CSV extractor")
+    parser.add_argument("--supplier-id", help="Supplier identity from the live negotiation thread")
+    parser.add_argument("--part-id", help="Optional part identity from the live negotiation thread")
     args = parser.parse_args()
 
     evidence = load_evidence(args.input)

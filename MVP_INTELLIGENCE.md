@@ -1,63 +1,76 @@
-# MVP intelligence: evidence ingestion and supplier context
+# Supplier evidence intelligence
 
-`negotiator/intelligence.py` turns the data-analysis team's JSON export into deterministic,
-JSON-serializable supplier context. It complements `negotiator/evaluator.py`: intelligence
-organizes evidence; the evaluator assesses proposed deal terms.
+`negotiator/intelligence.py` converts supplier CSV extraction records into normalized,
+source-traceable context. `arena_kit.quote_extract.extract_supplier_context()` connects
+the CSV parser to this module and returns both the original rows and the generated
+context as JSON-ready data.
 
-Supplier CSV attachments can first be converted with `arena_kit.quote_extract`. That extractor
-keeps every row, its original headers, and a `Source` with the attachment name and physical line.
-It rejects the bundled `data/data/` directory, so production evidence comes from the supplier's
-actual message attachment rather than local practice material. Its optional LLM priority mode is
-for the data-preparation team only; this intelligence module never makes an LLM call.
+During Arena sessions, `arena_kit.play.fetch_documents()` also parses incoming supplier
+CSV attachments. The thread receives `csv_records` and, when its supplier ID is known,
+`supplier_context` alongside the original readable attachment text. Malformed CSVs stay
+on the message as `csv_parse_error` so the agent can request a corrected file.
 
-## Current input
+The supplier identity and optional part identity come from the live negotiation
+thread or the caller. The parser does not guess Arena IDs from a supplier name or
+vendor-specific ID. Conflicting supplier-provided IDs are retained as reported
+evidence while the live thread ID scopes the context. Files with multiple identified
+parts produce one context per part; ambiguous rows require an explicit `part_id`.
+Known bundled `data/data/` inputs are rejected by the CSV extractor.
 
-The input is a JSON array. Current records use an `Information` object plus `Source` and
-`Priority (Argument wise)` wrapper fields. Historical quote records include IDs such as
-`quote:7100001`, a supplier ID, a part ID, quote date, unit price, and other commercial terms.
+## Use from Python
 
-`load_evidence(path_or_list)` validates that the top level is an array and raises
-`EvidenceInputError` with a clear message otherwise. It converts safe numeric and boolean string
-encodings (for example, `"142.5"` and `"true"`) while preserving `Information`, source, priority,
-and unfamiliar wrapper fields. Records merely need to be JSON objects, which lets future evidence
-types pass through even when their `Information` fields differ from quotes.
+```python
+from arena_kit.quote_extract import extract_supplier_context
 
-Extractor records do not need arena identities in the CSV. After the live negotiation thread
-supplies the supplier and optional part ID, call `bind_evidence_scope(evidence, supplier_id,
-part_id)`. It adds that explicit scope only when no conflicting ID was supplied; it never guesses
-the identity. Common CSV headers such as `Unit Price`, `Price`, and `Payment Terms` are exposed as
-canonical fields while the original headers remain intact. If an extractor record has no separate
-ID, its source line is also used as its stable evidence ID.
+result = extract_supplier_context(
+    ["supplier_quote.csv"],
+    supplier_id="sup:from-live-thread",
+)
+```
 
-## Output
+The result shape is:
 
-`build_supplier_context(evidence, supplier_id, part_id=None)` returns matching evidence, quote
-history, a supplier profile, and evidence gaps. Each evidence item retains its original ID and
-source. Quote-history values include `fact_sources`, which maps every derived field to the ID and
-source record(s) used to calculate it. This makes count, latest date/price, min/max price, and
-awarded count auditable.
+```json
+{
+  "schema": "supplier_context_v1",
+  "supplier_id": "sup:from-live-thread",
+  "records": [],
+  "contexts": []
+}
+```
 
-## Quote-only limitation
+Each context contains matching evidence, quote history with `fact_sources`, supplier
+profile dimensions, and evidence gaps. Original headers and source line references
+remain available in `records` and the context evidence.
 
-Historical quotes describe quote history only. They must **not** be used to infer cash pressure,
-capacity pressure, or quality sensitivity. Consequently all four current profile dimensions
-(`cash_sensitive`, `capacity_sensitive`, `price_rigid`, and `quality_sensitive`) remain
-`unknown` with confidence `0.0`, including when many historical quotes are present. Quote-only
-input reports the missing payment, financial, document, capacity, and quality evidence.
-
-## Extending with future evidence
-
-Future records can expose a `kind`, `evidence_kind`, or `type` field; otherwise the ID prefix is
-used (for example, `document:12` becomes `document`). Unknown fields are retained in `data`, and
-unknown wrapper fields in `record_fields`. Add narrowly scoped, deterministic rules for each new
-kind before changing a profile dimension, and include the contributing evidence ID/source in the
-corresponding provenance. Do not make an LLM call or infer traits from unrelated evidence.
-
-## Demo
-
-Run the default local export, or provide a different file and filters:
+## Use from the command line
 
 ```bash
-uv run python -m negotiator.demo_intelligence
-uv run python -m negotiator.demo_intelligence path/to/output.json --supplier-id sup:70110 --part-id part:310010
+python -m arena_kit.quote_extract supplier_quote.csv \
+  --context --supplier-id sup:from-live-thread > supplier_context.json
 ```
+
+Pass `--part-id part:from-live-thread` when the uploaded rows do not identify a part
+and the live thread provides one. Without `--context`, the command retains its
+original behavior and writes the extracted JSON array.
+
+`load_evidence()` also accepts a JSON array or a list of records directly. It
+canonicalizes common supplier CSV headers such as `Unit Price`, `Price`, and
+`Payment Terms` while retaining original keys and unfamiliar fields. If an extracted
+row has no ID, its `Source` line becomes its stable evidence ID.
+
+Quote history is descriptive. It does not establish cash pressure, capacity pressure,
+price rigidity, quality sensitivity, or buyer targets. Profile dimensions therefore
+remain `unknown`. The `SupplierContextAgent` does use the available evidence directly:
+it carries explicit supplier-stated commercial terms into counters, considers a
+same-context historical quote when setting its price target, responds to the supplier's
+latest concession, and cites the highest-priority supplier evidence in its message.
+Those steps use observed supplier facts; they do not claim to infer the supplier's
+motives or the buyer's willingness to pay.
+
+## Relationship to the deal evaluator
+
+`negotiator.evaluator.evaluate_deal()` remains a separate prototype. It requires an
+Arena case and uses buyer costs, must-haves, and alternatives. The supplier CSV
+parser does not call it, because those inputs are outside the supplier-only evidence
+pipeline.
