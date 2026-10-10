@@ -1,0 +1,84 @@
+You are working in the repository at `/home/stefan/dev/hackathon/slavs-and-a-ottman`.
+
+Build the first minimal component of our negotiation agent: a deterministic deal evaluator. The repository currently contains only the starter kit; do not build an LLM email writer, data-mining pipeline, package optimiser, or arena runner yet.
+
+Goal: given an arena case, a supplier’s standard terms, a candidate term sheet, and optional manually supplied supplier-economic assumptions, output one JSON-serializable evaluation of whether this is a good deal for Hollerau and what it is likely worth to the supplier.
+
+Use the starter-kit cost functions rather than duplicating formulae. In particular, inspect and reuse appropriate functions from `arena_kit/cost.py`, including `complete_offer`, `closing_terms`, `total_cost`, `cost_breakdown`, `must_haves_ok`, and `supplier_value`.
+
+Create a new, clearly separated package named `negotiator/`. Do not modify files under `data/`, `brief/`, or the existing starter-kit logic unless a small import-only change is unavoidable.
+
+Implement:
+
+1. `negotiator/evaluator.py`
+
+Expose a main function similar to:
+
+```python
+evaluate_deal(
+    case: dict,
+    proposed_terms: dict,
+    supplier_standard_terms: dict,
+    supplier_economics: dict | None = None,
+) -> dict
+```
+
+The output must be JSON-serializable and include:
+
+```json
+{
+  "final_terms": {},
+  "buyer": {
+    "total_cost": 0.0,
+    "cost_breakdown": {},
+    "must_haves_ok": true,
+    "alternative_cost": 0.0,
+    "beats_alternative": true
+  },
+  "supplier": {
+    "value_per_unit": 0.0,
+    "estimated_margin_pct": 0.0,
+    "assessment_available": true,
+    "reason_unavailable": null
+  },
+  "valid_for_negotiation": true,
+  "warnings": []
+}
+```
+
+Requirements:
+
+- Complete and validate the candidate term sheet against the case’s negotiable fields and allowed options.
+- Calculate buyer cost using supplier standard terms for any closing-term calculation.
+- Calculate the alternative cost if the case contains a usable alternative; otherwise return `null`.
+- `valid_for_negotiation` must be false if must-haves fail, buyer cost is not finite, or the term sheet is invalid.
+- Do not automatically reject a package merely because it is worse than the alternative; report that clearly as a warning. The later negotiation policy will decide whether to send it.
+- Supplier economics are optional. Only calculate `value_per_unit` and `estimated_margin_pct` when enough assumptions are available to call the starter-kit supplier-value logic safely.
+- If supplier economics are missing or incomplete, set `assessment_available` to false and explain what is missing. Never fabricate a supplier cost, interest rate, or margin.
+- Catch invalid input cleanly and return clear errors or a documented exception type.
+
+2. `negotiator/demo_evaluator.py`
+
+Create a small runnable demo using one starter-kit simulator case, such as `arena_kit/sim_cases/S01.json`, plus manually declared supplier standard terms and supplier-economic assumptions. It should print the evaluation as formatted JSON.
+
+3. Tests
+
+Add focused pytest tests covering:
+
+- a valid package produces buyer total cost and cost breakdown;
+- a must-have violation produces `valid_for_negotiation: false`;
+- a package with incomplete supplier assumptions produces no invented supplier assessment;
+- a complete supplier assumption produces a supplier value and estimated margin;
+- an alternative is correctly compared when present.
+
+4. Documentation
+
+Create `MVP_EVALUATOR.md` that explains:
+
+- this is the first component only;
+- its exact input and output shape;
+- what “buyer total cost” means;
+- that supplier economics are estimates, not facts;
+- how to run the demo and tests.
+
+Keep the code simple, typed where useful, deterministic, and easy for another team to call later. After implementation, run the relevant tests and report the files created, test results, and any assumptions you made.

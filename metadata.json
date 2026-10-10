@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4K97WMWWWP273DDZPKG5BTM",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "MVP_EVALUATOR.md",
+    "negotiator/__init__.py",
+    "negotiator/demo_evaluator.py",
+    "negotiator/evaluator.py",
+    "tests/test_evaluator.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 58087,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 619520,
+    "output_tokens": 11533,
+    "api_call_count": 16,
+    "subagent_tokens_complete": true
+  }
+}
