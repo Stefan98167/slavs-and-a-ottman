@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -37,6 +38,30 @@ def source_version():
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+
+
+def summarize_records(records):
+    """Return a consistent score and safety summary for a validation batch."""
+    scores = [(record.get("result") or {}).get("score") for record in records]
+    scores = [score for score in scores
+              if isinstance(score, (int, float)) and math.isfinite(score)]
+    return {
+        "case_count": len(records),
+        "scored_cases": len(scores),
+        "mean_score": sum(scores) / len(scores) if scores else None,
+        "deals": sum(bool((record.get("result") or {}).get("deal")) for record in records),
+        "ended_sessions": sum(bool((record.get("result") or {}).get("ended")) for record in records),
+        "runner_errors": sum(bool(record.get("run_error") or record.get("recovery_error"))
+                              for record in records),
+        "audit_errors": sum(len(record.get("audit_errors") or []) for record in records),
+        "timeouts": sum(sum((record.get("timeout_counts") or {}).values()) for record in records),
+    }
+
+
+def order_records(records):
+    """Make saved parallel-run records stable regardless of completion order."""
+    return sorted(records, key=lambda record: (str(record.get("case_id", "")),
+                                               str(record.get("agent", ""))))
 
 
 def audit_decisions(case, decisions):
@@ -197,8 +222,10 @@ def main():
     manifest["results"] = [{key: record.get(key) for key in
                             ("case_id", "agent", "result", "audit_errors", "session_id",
                              "replay_url", "run_error", "timeout_counts")}
-                           for record in records]
+                           for record in order_records(records)]
+    manifest["summary"] = summarize_records(records)
     write_json(args.out / "run.json", manifest)
+    print(json.dumps({"summary": manifest["summary"]}), flush=True)
 
 
 if __name__ == "__main__":
