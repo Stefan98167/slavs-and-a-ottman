@@ -1,0 +1,175 @@
+[
+  {
+    "supplier_id": "sup:84220",
+    "processed_at": "2026-10-10T17:32:45.955541",
+    "original_brief": {
+      "supplier_id": "sup:84220",
+      "action": "send_offer",
+      "objective": "Leverage early settlement liquidity and contract commitment to secure price concessions on industrial equipment components.",
+      "packages": [
+        {
+          "label": "cash_trade",
+          "terms": {
+            "unit_price": 88.5,
+            "payment_days": 14,
+            "contract_months": 24
+          },
+          "buyer_total_cost": 178200.0,
+          "purpose": "Maximum price reduction conditional on expedited 14-day cash settlement and extended 24-month contract commitment"
+        },
+        {
+          "label": "balanced",
+          "terms": {
+            "unit_price": 91.0,
+            "payment_days": 30,
+            "contract_months": 12
+          },
+          "buyer_total_cost": 182500.0,
+          "purpose": "Standard balanced commercial terms aligning benchmark pricing with net-30 settlement"
+        },
+        {
+          "label": "supplier_cash_flow",
+          "terms": {
+            "unit_price": 93.5,
+            "payment_days": 60,
+            "contract_months": 12
+          },
+          "buyer_total_cost": 187400.0,
+          "purpose": "Extended payment flexibility for buyer treasury while accommodating standard supplier margins"
+        }
+      ],
+      "approved_evidence": [
+        {
+          "text": "Cite the verified mechanical machinery capital-goods index stabilization.",
+          "refs": [
+            "idx:PPI-M284@2025-11",
+            "idx:PPI-M284@2026-09"
+          ]
+        }
+      ],
+      "email_rules": [
+        "Do not invent facts or modify proposed commercial terms.",
+        "Offer all three packages clearly with their respective tradeoffs.",
+        "Explicitly request a granular cost breakdown across raw materials, manufacturing, and financing.",
+        "Mention the approved mechanical machinery price index references verbatim."
+      ]
+    },
+    "generated_email": {
+      "subject": "Supplier Offer for Industrial Equipment Components - ID: sup:84220",
+      "body": "Dear [Supplier's Name],\n\nI hope this message finds you well. We are reaching out to present our offer for the procurement of industrial equipment components, leveraging our early settlement liquidity and commitment to secure favorable pricing.\n\nWe have structured our offer into three distinct packages, each with its own terms and trade-offs:\n\n1. **Cash Trade Package**  \n   - **Unit Price:** $88.50  \n   - **Payment Terms:** 14 days  \n   - **Contract Duration:** 24 months  \n   - **Total Cost:** $178,200.00  \n   - **Purpose:** Maximum price reduction conditional on expedited 14-day cash settlement and extended 24-month contract commitment.\n\n2. **Balanced Package**  \n   - **Unit Price:** $91.00  \n   - **Payment Terms:** 30 days  \n   - **Contract Duration:** 12 months  \n   - **Total Cost:** $182,500.00  \n   - **Purpose:** Standard balanced commercial terms aligning benchmark pricing with net-30 settlement.\n\n3. **Supplier Cash Flow Package**  \n   - **Unit Price:** $93.50  \n   - **Payment Terms:** 60 days  \n   - **Contract Duration:** 12 months  \n   - **Total Cost:** $187,400.00  \n   - **Purpose:** Extended payment flexibility for buyer treasury while accommodating standard supplier margins.\n\nWe believe these packages offer a range of options to suit both our needs and yours. Additionally, we would appreciate it if you could provide a granular cost breakdown across raw materials, manufacturing, and financing for each package.\n\nFurthermore, we would like to cite the verified mechanical machinery capital-goods index stabilization as a reference for our pricing discussions. Please see the following indices for your review:  \n- idx:PPI-M284@2025-11  \n- idx:PPI-M284@2026-09\n\nWe look forward to your response and hope to finalize an agreement that benefits both parties.\n\nBest regards,  \n[Your Name]  \n[Your Position]  \n[Your Company]  \n[Your Contact Information]",
+      "internal_summary": "The email outlines three pricing packages aimed at negotiating favorable terms for industrial equipment components. The Cash Trade Package offers the lowest unit price with a 14-day payment term and a 24-month commitment, while the Balanced Package provides standard terms with a 30-day payment period. The Supplier Cash Flow Package allows for extended payment terms at a higher unit price. A request for a detailed cost breakdown is included, along with references to the mechanical machinery price index."
+    }
+  },
+  {
+    "supplier_id": "sup:91040",
+    "processed_at": "2026-10-10T17:54:54.530697",
+    "original_brief": {
+      "supplier_id": "sup:91040",
+      "action": "send_offer",
+      "objective": "Skonto-Vorteil gegen fruehzeitige Liquiditaet testen und Vertragslaufzeit bei Praezisionskomponenten absichern.",
+      "packages": [
+        {
+          "label": "cash_trade",
+          "terms": {
+            "unit_price": 112.0,
+            "payment_days": 10,
+            "contract_months": 18
+          },
+          "buyer_total_cost": 224000.0,
+          "purpose": "Maximaler Preisnachlass bei beschleunigter Auszahlung innerhalb von 10 Tagen und 18 Monaten Bindung"
+        },
+        {
+          "label": "balanced",
+          "terms": {
+            "unit_price": 118.5,
+            "payment_days": 30,
+            "contract_months": 12
+          },
+          "buyer_total_cost": 237000.0,
+          "purpose": "Standardkonditionen mit 30 Tagen Zahlungsziel auf aktuellem Marktniveau"
+        }
+      ],
+      "approved_evidence": [
+        {
+          "text": "Rueckgang der Stahl- und Rohstofferzeugerpreise als Begruendung anfuehren.",
+          "refs": [
+            "idx:PPI-STEEL@2026-03",
+            "idx:PPI-STEEL@2026-09"
+          ]
+        }
+      ],
+      "email_rules": [
+        "Keine neuen Fakten oder Zahlen erfinden.",
+        "Beide Optionen mit klaren Vorteilen gegenueberstellen.",
+        "Detaillierte Kostenaufschluesselung (Cost Breakdown) nach Material- und Fertigungskosten fordern.",
+        "Die verifizierten Stahl-Indexreferenzen exakt zitieren."
+      ]
+    },
+    "generated_email": {
+      "subject": "Anfrage zu Angeboten - Lieferanten-ID: sup:91040",
+      "body": "Sehr geehrte Damen und Herren,\n\nich hoffe, diese Nachricht trifft Sie wohl. Im Rahmen unserer laufenden Verhandlungen über die Beschaffung von Präzisionskomponenten möchte ich Ihnen die beiden von Ihnen angebotenen Pakete näher vorstellen und um weitere Informationen bitten.\n\n**1. Paket: Cash Trade**  \n- **Einheitspreis:** 112,00 €  \n- **Zahlungstage:** 10  \n- **Vertragslaufzeit:** 18 Monate  \n- **Gesamtkosten für den Käufer:** 224.000,00 €  \n- **Zweck:** Maximaler Preisnachlass bei beschleunigter Auszahlung innerhalb von 10 Tagen und 18 Monaten Bindung.\n\n**2. Paket: Balanced**  \n- **Einheitspreis:** 118,50 €  \n- **Zahlungstage:** 30  \n- **Vertragslaufzeit:** 12 Monate  \n- **Gesamtkosten für den Käufer:** 237.000,00 €  \n- **Zweck:** Standardkonditionen mit 30 Tagen Zahlungsziel auf aktuellem Marktniveau.\n\nUm eine fundierte Entscheidung treffen zu können, bitte ich um eine detaillierte Kostenaufschlüsselung (Cost Breakdown) für beide Pakete, insbesondere hinsichtlich der Material- und Fertigungskosten.\n\nZusätzlich möchte ich auf die aktuellen Marktbedingungen hinweisen, insbesondere auf den Rückgang der Stahl- und Rohstofferzeugerpreise, wie in den folgenden PPI-Indizes dokumentiert:  \n- idx:PPI-STEEL@2026-03  \n- idx:PPI-STEEL@2026-09  \n\nIch freue mich auf Ihre Rückmeldung und danke Ihnen im Voraus für Ihre Unterstützung.\n\nMit freundlichen Grüßen,\n\n[Ihr Name]  \n[Ihre Position]  \n[Ihre Firma]  \n[Ihre Kontaktdaten]",
+      "internal_summary": "Die E-Mail stellt die beiden angebotenen Pakete klar gegenüber und fordert eine detaillierte Kostenaufschlüsselung an. Zudem wird auf die relevanten PPI-Indizes verwiesen, um die Verhandlungsposition zu stärken."
+    }
+  },
+  {
+    "supplier_id": "sup:84220",
+    "processed_at": "2026-10-10T19:24:16.231925",
+    "original_brief": {
+      "supplier_id": "sup:84220",
+      "action": "send_offer",
+      "objective": "Leverage early settlement liquidity and contract commitment to secure price concessions on industrial equipment components.",
+      "packages": [
+        {
+          "label": "cash_trade",
+          "terms": {
+            "unit_price": 88.5,
+            "payment_days": 14,
+            "contract_months": 24
+          },
+          "buyer_total_cost": 178200.0,
+          "purpose": "Maximum price reduction conditional on expedited 14-day cash settlement and extended 24-month contract commitment"
+        },
+        {
+          "label": "balanced",
+          "terms": {
+            "unit_price": 91.0,
+            "payment_days": 30,
+            "contract_months": 12
+          },
+          "buyer_total_cost": 182500.0,
+          "purpose": "Standard balanced commercial terms aligning benchmark pricing with net-30 settlement"
+        },
+        {
+          "label": "supplier_cash_flow",
+          "terms": {
+            "unit_price": 93.5,
+            "payment_days": 60,
+            "contract_months": 12
+          },
+          "buyer_total_cost": 187400.0,
+          "purpose": "Extended payment flexibility for buyer treasury while accommodating standard supplier margins"
+        }
+      ],
+      "approved_evidence": [
+        {
+          "text": "Cite the verified mechanical machinery capital-goods index stabilization.",
+          "refs": [
+            "idx:PPI-M284@2025-11",
+            "idx:PPI-M284@2026-09"
+          ]
+        }
+      ],
+      "email_rules": [
+        "Do not invent facts or modify proposed commercial terms.",
+        "Offer all three packages clearly with their respective tradeoffs.",
+        "Explicitly request a granular cost breakdown across raw materials, manufacturing, and financing.",
+        "Mention the approved mechanical machinery price index references verbatim."
+      ]
+    },
+    "generated_email": {
+      "subject": "Angebot für industrielle Ausrüstungsbestandteile - Lieferant ID: sup:84220",
+      "body": "Sehr geehrte Damen und Herren,\n\nim Rahmen unserer laufenden Verhandlungen möchte ich Ihnen drei verschiedene Paketoptionen für die Lieferung von industriellen Ausrüstungsbestandteilen unterbreiten. Diese Optionen sind darauf ausgelegt, unsere Liquidität durch frühzeitige Zahlungen zu nutzen und gleichzeitig Preisnachlässe zu sichern. \n\nHier sind die verfügbaren Pakete:\n\n1. **Cash Trade**  \n   - **Einheitspreis:** 88,5 €  \n   - **Zahlungstage:** 14  \n   - **Vertragslaufzeit:** 24 Monate  \n   - **Gesamtkosten für den Käufer:** 178.200,00 €  \n   - **Zweck:** Maximale Preisreduzierung, bedingt durch eine beschleunigte 14-tägige Barzahlung und eine verlängerte 24-monatige Vertragsbindung.\n\n2. **Balanced**  \n   - **Einheitspreis:** 91,0 €  \n   - **Zahlungstage:** 30  \n   - **Vertragslaufzeit:** 12 Monate  \n   - **Gesamtkosten für den Käufer:** 182.500,00 €  \n   - **Zweck:** Standardisierte, ausgewogene kommerzielle Bedingungen, die die Benchmark-Preise mit einer Net-30-Zahlung in Einklang bringen.\n\n3. **Supplier Cash Flow**  \n   - **Einheitspreis:** 93,5 €  \n   - **Zahlungstage:** 60  \n   - **Vertragslaufzeit:** 12 Monate  \n   - **Gesamtkosten für den Käufer:** 187.400,00 €  \n   - **Zweck:** Erweiterte Zahlungsflexibilität für die Käuferkasse unter Berücksichtigung der Standardmargen des Lieferanten.\n\nZusätzlich möchte ich auf die stabilisierenden Indizes für mechanische Maschinen hinweisen, die in den folgenden Referenzen verifiziert sind:  \n- idx:PPI-M284@2025-11  \n- idx:PPI-M284@2026-09  \n\nUm eine fundierte Entscheidung treffen zu können, bitte ich um eine detaillierte Kostenaufschlüsselung (Cost Breakdown) für die oben genannten Pakete, die die Rohmaterialien, die Fertigung und die Finanzierung umfasst.\n\nIch freue mich auf Ihre Rückmeldung und darauf, die nächsten Schritte zu besprechen.\n\nMit freundlichen Grüßen,\n\n[Ihr Name]  \n[Ihre Position]  \n[Ihre Firma]  \n[Ihre Kontaktdaten]",
+      "internal_summary": "Angebot umfasst drei Pakete mit unterschiedlichen Zahlungsbedingungen und Preisen. Ziel ist es, durch frühzeitige Zahlungen Preisnachlässe zu sichern. Detaillierte Kostenaufschlüsselung angefordert."
+    }
+  }
+]
