@@ -90,3 +90,39 @@ def test_remote_table_resumes_final_duplicate_session():
         ("GET", "/v1/sessions/sim-final"),
         ("GET", "/v1/sessions/sim-final/threads/sup:1"),
     ]
+
+
+def test_restart_resumes_and_closes_existing_final_session():
+    case = {"case_id": "case:S01", "buyer": {}, "suppliers": ["sup:1"]}
+    opening = {"from": "supplier", "status": "agreed", "term_sheets": [
+        {"term_sheet_id": "offer:1-1", "terms": {"unit_price": 10}},
+    ], "attachments": []}
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if request.method == "POST" and request.url.path.endswith("/sessions"):
+            return httpx.Response(409, json={"detail": "one session per case in the final: sim-final"})
+        if request.method == "GET" and request.url.path.endswith("/sessions/sim-final"):
+            return httpx.Response(200, json={"status": "open", "threads": {"sup:1": {"status": "agreed"}}})
+        if request.method == "GET" and request.url.path.endswith("/threads/sup:1"):
+            return httpx.Response(200, json={"supplier_id": "sup:1", "offer_id": "offer:1-1",
+                                             "status": "agreed", "messages": [opening], "timeouts": []})
+        if request.method == "POST" and request.url.path.endswith("/threads/sup:1/messages"):
+            return httpx.Response(200, json={"result": {"ended": True, "deal": True, "supplier_id": "sup:1"}})
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    client = ArenaClient("https://arena.invalid", transport=httpx.MockTransport(handler), retries=0)
+
+    class Buyer:
+        def decide(self, case, threads):
+            return {"supplier_id": "sup:1", "message": {
+                "action": {"type": "accept", "term_sheet_id": "offer:1-1"},
+            }}
+
+    result = play(RemoteTable(client, case), case["case_id"], Buyer())
+    assert result == {"ended": True, "deal": True, "supplier_id": "sup:1"}
+    assert calls.count(("POST", "/v1/sessions")) == 1
+    assert calls.count(("POST", "/v1/sessions/sim-final/threads/sup:1/messages")) == 1
+    assert ("GET", "/v1/sessions/sim-final") in calls
+    assert ("GET", "/v1/sessions/sim-final/threads/sup:1") in calls
