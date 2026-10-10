@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .supplier_profile import build_supplier_profile
+
 
 class EvidenceInputError(ValueError):
     """Raised when an evidence document cannot be read as the expected JSON array."""
@@ -22,12 +24,6 @@ class EvidenceInputError(ValueError):
 
 _NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 _WRAPPER_KEYS = {"Information", "Source", "Priority (Argument wise)"}
-_PROFILE_DIMENSIONS = (
-    "cash_sensitive",
-    "capacity_sensitive",
-    "price_rigid",
-    "quality_sensitive",
-)
 _CANONICAL_FIELD_ALIASES = {
     "supplier_id": {"supplier_id", "supplier id", "supplier", "supplier number"},
     "part_id": {"part_id", "part id", "part", "part number", "item", "item number"},
@@ -158,7 +154,7 @@ def build_supplier_context(
     """Build a JSON-serializable, traceable context for one supplier and optional part.
 
     Only records whose normalized ``kind`` is ``quote`` contribute to ``quote_history``.  The
-    profile deliberately remains unknown until a future evidence-specific rule is added.
+    profile uses narrowly scoped explicit supplier statements with source references.
     """
     matches = filter_evidence(evidence, supplier_id, part_id)
     quotes = [record for record in matches if record.get("kind") == "quote"]
@@ -170,7 +166,7 @@ def build_supplier_context(
         "evidence": [_context_evidence(record) for record in matches],
         "quote_history": _quote_history(quotes),
         "supplier_claims": [_context_evidence(record) for record in claims],
-        "supplier_profile": {dimension: {"state": "unknown", "confidence": 0.0} for dimension in _PROFILE_DIMENSIONS},
+        "supplier_profile": build_supplier_profile(matches),
         "evidence_gaps": _evidence_gaps(matches),
     }
 
@@ -381,7 +377,16 @@ def _quote_history(quotes: list[Mapping[str, Any]]) -> dict[str, Any]:
     one_known_basis = (
         len(bases) == 1 and all(currency and unit for currency, unit in bases)
     )
-    comparable_prices = prices if one_known_basis else []
+    # A common currency/unit alone does not make different commercial offers comparable.
+    commercial_fields = ("volume_per_year", "contract_months", "payment_days", "lead_time_days",
+                         "incoterm", "index_clause", "tooling_eur", "effective_date",
+                         "ppm_commitment", "chargeback_eur_per_complaint")
+    commercial_bases = {
+        json.dumps({field: _quote_terms(quote["data"]).get(field) for field in commercial_fields},
+                   sort_keys=True, default=str)
+        for quote in priced_quotes
+    }
+    comparable_prices = prices if one_known_basis and len(commercial_bases) == 1 else []
     min_price = min(comparable_prices, key=lambda item: item[0], default=None)
     max_price = max(comparable_prices, key=lambda item: item[0], default=None)
     awarded = [quote for quote in quotes if quote.get("data", {}).get("awarded") is True]
@@ -468,6 +473,6 @@ def _evidence_gaps(matches: list[Mapping[str, Any]]) -> list[str]:
         gaps.append("No supplier quote or offer with a unit price was found in the supplied records.")
     if kinds - {"quote", "claim"}:
         gaps.append(
-            "Other supplier evidence is retained but not yet interpreted; supplier profile states remain unknown."
+            "Other supplier evidence is retained; only recognized explicit statements support supplier profiles."
         )
     return gaps

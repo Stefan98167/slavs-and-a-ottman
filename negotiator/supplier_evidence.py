@@ -41,6 +41,7 @@ def quote_pdf_record(text: str, source: str, supplier_id: str | None = None) -> 
         "currency": "EUR" if "unit_price" in effective_terms else None,
         "term_sections": sections,
         "terms": effective_terms,
+        "document_text": text[:20000],
         **effective_terms,
     }
     if "unit_price" in effective_terms:
@@ -55,6 +56,9 @@ def supplier_message_records(message: Mapping[str, Any], supplier_id: str) -> li
     source = _message_source(message)
     records: list[dict[str, Any]] = []
     body = str(message.get("body") or "")
+    if body.strip() and message.get("from") not in {"buyer", "arena"}:
+        records.append(_record({"kind": "document", "id": source,
+                                "supplier_id": supplier_id, "message_text": body}, source, 3))
     claims: dict[tuple[str, str], dict[str, Any]] = {}
 
     for match in _INDEX_COST_CLAIM.finditer(body):
@@ -124,7 +128,7 @@ def build_thread_supplier_context(
     """Combine all supplier evidence in a thread, preserving the source of every fact."""
     records: list[dict[str, Any]] = []
     for event in events:
-        if event.get("from") == "buyer":
+        if event.get("from") in {"buyer", "arena"}:
             continue
         # Attachments come first so an attached quote PDF is the primary source for
         # that offer; the email term sheet fills any fields the PDF omitted.
