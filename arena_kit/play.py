@@ -386,9 +386,12 @@ def play_waves(client, new_agent, waves=5, parallel=10, poll=5.0):
         while len(closed) < waves or not all(f.done() for f in started.values()):
             try:
                 cases = client.cases("final")
-            except ArenaError as e:
-                if e.status != 403:  # 403: no wave has started yet
-                    raise
+            except Exception as e:
+                stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                if isinstance(e, ArenaError) and e.status == 403:  # no wave has started yet
+                    log.info("final poll: %s at %s", e, stamp)
+                else:
+                    log.exception("final poll failed at %s; retrying in %.1fs", stamp, poll)
                 cases = []
             for case in cases:
                 if not case.get("open"):
