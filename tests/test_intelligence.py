@@ -27,6 +27,27 @@ def test_load_normalizes_values_and_preserves_unknown_fields():
     assert evidence[1]["data"]["future_quote_field"] == "kept"
 
 
+def test_load_maps_supplier_headers_with_units_and_keeps_original_headers():
+    record = load_evidence([{
+        "Information": {
+            "Quoted price (EUR/pc)": "138,55",
+            "Payment terms (days net)": "30",
+            "Annual quantity (pcs)": "8150",
+            "Cost share (%)": "45",
+        },
+        "Source": "supplier_quote.csv:2",
+        "Priority (Argument wise)": 1,
+    }])[0]
+
+    assert record["kind"] == "quote"
+    assert record["source"] == "supplier_quote.csv:2"
+    assert record["data"]["Quoted price (EUR/pc)"] == "138,55"
+    assert record["data"]["unit_price"] == 138.55
+    assert record["data"]["payment_days"] == 30
+    assert record["data"]["volume_per_year"] == 8150
+    assert record["data"]["cost_share_pct"] == 45
+
+
 def test_filter_and_context_are_traceable_and_do_not_infer_profile_traits():
     evidence = load_evidence(json.loads(FIXTURE.read_text()))
     matches = filter_evidence(evidence, "sup:70110", "part:310010")
@@ -47,7 +68,7 @@ def test_filter_and_context_are_traceable_and_do_not_infer_profile_traits():
         for profile in context["supplier_profile"].values()
     )
     assert context["evidence_gaps"] == [
-        "No payment, financial, document, capacity, or quality evidence is available in this input."
+        "No explicit supplier index or cost-share claims were found in the supplied records."
     ]
     assert json.loads(json.dumps(context)) == context
 

@@ -5,7 +5,7 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 ## Negotiator MVP components
 
 - [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal using case and buyer data.
-- [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built directly from supplier CSV extracts.
+- [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built from live supplier messages, PDFs, and CSVs.
 - [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving CSV parsing, with an option to pass parsed rows into the intelligence component.
 
 ## Supplier-only input policy
@@ -42,9 +42,11 @@ The resulting JSON contains the unchanged extracted `records` plus one or more
 references, supplier profile fields, and evidence gaps. It does not invent buyer
 targets or supplier traits from quote history.
 
-During Arena sessions the runner parses incoming supplier CSV attachments and adds
-`csv_records` and `supplier_context` to that supplier's thread. The supplier agent
-reads those fields alongside the supplier's live offers.
+During Arena sessions the runner parses incoming supplier CSV attachments into
+`csv_records` and reads PDFs as text. The supplier agent combines these with each
+supplier offer and explicit index/cost-share claims into one sourced context. The
+context retains quote terms and history, normalized claims, and source references to
+the originating attachment, CSV row, or supplier message.
 
 ## Run the supplier-only agent
 

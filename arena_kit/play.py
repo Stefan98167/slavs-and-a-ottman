@@ -3,8 +3,8 @@ final) or `arena-sim`, the local contract simulator. Both speak the same API.
 
 An agent is any object with `decide(case, threads) -> {"supplier_id": ..., "message": {...}}`:
   threads: {supplier_id: [message, ...]} - every e-mail so far, both directions, in order;
-           supplier attachments carry readable `text`; CSVs also carry `csv_records` and
-           a thread-scoped `supplier_context` when the attachment is parsed successfully.
+           supplier attachments carry readable `text`; CSVs also carry extracted `csv_records`.
+           The supplier agent normalizes email claims and PDF/CSV evidence into one context.
   message: subject, body, up to 3 term sheets, refs - or an "action" that closes the case:
            {"type": "accept", "term_sheet_id": ...} or {"type": "walk_away"}.
 """
@@ -145,8 +145,9 @@ def fetch_documents(table, message, supplier_id=None):
     """Download supplier attachments, expose readable text, and parse CSV evidence.
 
     CSV attachments get ``csv_records`` plus a supplier-scoped ``supplier_context``
-    when the caller supplies the thread's supplier ID. Parse failures remain on the
-    attachment as ``csv_parse_error`` so an agent can ask the supplier to resend it.
+    when the caller supplies the thread's supplier ID; PDFs get readable text. The
+    supplier agent combines these with supplier messages into one sourced context.
+    CSV parse failures remain on the attachment as ``csv_parse_error``.
     """
     for att in message.get("attachments") or []:
         name = att.get("name", "")

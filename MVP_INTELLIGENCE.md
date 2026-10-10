@@ -5,10 +5,13 @@ source-traceable context. `arena_kit.quote_extract.extract_supplier_context()` c
 the CSV parser to this module and returns both the original rows and the generated
 context as JSON-ready data.
 
-During Arena sessions, `arena_kit.play.fetch_documents()` also parses incoming supplier
-CSV attachments. The thread receives `csv_records` and, when its supplier ID is known,
-`supplier_context` alongside the original readable attachment text. Malformed CSVs stay
-on the message as `csv_parse_error` so the agent can request a corrected file.
+During Arena sessions, `arena_kit.play.fetch_documents()` parses incoming supplier CSV
+attachments into `csv_records` and reads PDFs into text. The supplier agent combines
+those inputs with supplier email claims and live term sheets through
+`negotiator.supplier_evidence.build_thread_supplier_context()`. The resulting context
+unifies PDF quote sections, CSV rows, offer history, and index/cost-share claims while
+preserving the attachment, row, or message that supplied each fact. Malformed CSVs
+stay on the message as `csv_parse_error`.
 
 The supplier identity and optional part identity come from the live negotiation
 thread or the caller. The parser does not guess Arena IDs from a supplier name or
@@ -39,9 +42,9 @@ The result shape is:
 }
 ```
 
-Each context contains matching evidence, quote history with `fact_sources`, supplier
-profile dimensions, and evidence gaps. Original headers and source line references
-remain available in `records` and the context evidence.
+Each context contains matching evidence, quote history with `fact_sources`, explicit
+supplier claims, supplier profile dimensions, and evidence gaps. Original headers and
+source line references remain available in `records` and the context evidence.
 
 ## Use from the command line
 
@@ -61,7 +64,7 @@ row has no ID, its `Source` line becomes its stable evidence ID.
 
 Quote history is descriptive. It does not establish cash pressure, capacity pressure,
 price rigidity, quality sensitivity, or buyer targets. Profile dimensions therefore
-remain `unknown`. The `SupplierContextAgent` does use the available evidence directly:
+remain `unknown`. The `SupplierContextAgent` uses the available evidence directly:
 it carries explicit supplier-stated commercial terms into counters, considers a
 same-context historical quote when setting its price target, responds to the supplier's
 latest concession, and cites the highest-priority supplier evidence in its message.
