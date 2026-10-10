@@ -25,4 +25,18 @@ Add team members, roles, and contribution guidance here. During the hackathon, k
 
 ## Agent session tracking
 
-This repository uses [Entire](https://entire.io/) to save coding-agent session context alongside Git history. Contributors using Codex can install the Entire CLI, run `entire enable` in the repository, and review the repository's hooks with `/hooks` before trusting them. Check the setup with `entire status`.
+This repository uses [Entire](https://entire.io/) to save coding-agent session context alongside Git history. Contributors using Codex can install and enable the Entire CLI from the repository:
+
+```sh
+curl -fsSL https://entire.io/install.sh | bash
+entire enable
+```
+
+Verify the setup with:
+
+```sh
+entire status
+entire doctor
+```
+
+After Codex makes a real file change and that change is committed, Entire should push a checkpoint ref. Review the repository's hooks with `/hooks` before trusting them.
