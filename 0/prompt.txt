@@ -356,3 +356,21 @@ negotiable fields. Fix crashes; do not tune strategy.
   Do NOT merge to main yourself; we will merge after reviewing.
 - Final report: backup branch + hash, integration branch + hash, test count, anything you could not
   verify, and any risk you noticed that I should know about before 12:00.
+
+---
+
+Do all of the 10 tests in the arena once and calculate the average score and also look if something changed.
+
+---
+
+please push
+
+---
+
+Do the good ol' three random, reflect and refractor and then interate again. Three iterations
+
+---
+
+<send_user_message_question_reply>
+[{"answer":"9 hosted runs (3 each iteration)","question":"Validation scope for the three iterations?","questionItemId":"[\"request_user_input_async\",\"call_3BmlIDb8bLXQVbLKzqEXgHTQ\",0]"}]
+</send_user_message_question_reply>
