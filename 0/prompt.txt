@@ -1,0 +1,140 @@
+can you push. first check all conflicts and so on
+
+---
+
+[Image #1] how far are we to reaching this architecture or at lease the mvp? check all md files to gain context
+
+---
+
+Can you make a graph from the one that I sent you where you visualize what is done and what not
+
+---
+
+Where can I see it? Now I just see text. I want to see a graph
+
+---
+
+Export it as png and I will open the file.
+
+---
+
+Let's do Generate valid term packages next. Ask for any context you need. I mean you know how all of this works thourgh the md files
+
+---
+
+Yes do what you recommend
+
+---
+
+What did we actually do here? And what is left to do in this step? What is the step?
+
+---
+
+Do what is left. If you need context ask
+
+---
+
+What is left? My part right now are those from the screenshot [Image #1]
+
+---
+
+Ok what do you recommend to do next
+
+---
+
+First of all pull from github and merge, my friend finished something
+
+---
+
+Did he cook with his work? Is it good? What did he do from the graph
+
+---
+
+do one test in the real arena just to test. maybe p10. use .env and tell me the score
+
+---
+
+pull and merge. think before merging and ask if you dont know something
+
+---
+
+so push now so he can pull
+
+---
+
+Generate a new graph what we already have and what is missing
+
+---
+
+Check origin if needed pull and merge. Think. Dont make mistakes.
+
+---
+
+Is everything connected now?
+
+---
+
+Can I connect them now or should I not do it?
+
+---
+
+Can you please connect them and try with P10?
+
+---
+
+so commit and push now so my friend can merge. And then create the visualization again please
+
+---
+
+pull and tell me if he cooked
+
+---
+
+How far are we percent wise to an working mvp?
+
+---
+
+Can we do it until tomorrow 8 am
+
+---
+
+What is left to do? Create the visualization and then we will decide who does what. Also explain what each does.
+
+---
+
+The map that you gave me is different then the older one. I want it in the format of the older one
+
+---
+
+Now explain what is left to do. Also say 1-10 how difficult each is so we can distribute the to dos on the team
+
+---
+
+The technical people are Jonas and Stefan and the non are Ahmet and Georgi. Maybe create an md file that is called to do and there explain detailed for each person what everyone has to do. Keep in mind that it all has to be modular so we can merge. Make an TODO.md and push it so other can pull.
+
+---
+
+Let's do the first one for me which is Repair the one red simulator assertion so it accepts quote-parser metadata (`currency`, `price_unit`) while still checking the Arena contract terms.
+
+---
+
+Let's do the next one Consume Jonas's profile contract without reinterpreting evidence. Unknown profile values must keep the conservative price-only ladder. What does that mean?
+
+---
+
+Implement it
+
+---
+
+Implement the rest. Test between each one and think between does this make sense? Also reread the case from the md files so the hackathon details and rethink if this makes sense. Take the time you need. Here is the rest:
+
+---
+
+Here is the rest. Move the existing bounded supplier-claim adjustment into the unified policy. Supplier index/cost-share claims may adjust an opening ask only within a documented cap and must be cited in the message.
+4. Add a hypothesis/trade layer that maps a `likely` profile to a concrete give/get: for example, earlier payment or commitment only when the evidence supports it. Every package must still satisfy buyer must-haves and reservation cost.
+5. Improve multi-round behavior: choose whether to re-package, hold, accept, or walk away using the current offer, remaining moves, reservation cost, and supplier response.
+6. Keep the existing `supplier`, `packages`, and `advanced` agents runnable as comparison baselines. Keep `unified` selectable until practice results support making it the default.
+
+---
+
+pull and merge. Jonas pushed his stuff. Make sure everything works together. When finished create the graph again what is left to do.
