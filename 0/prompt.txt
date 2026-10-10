@@ -138,3 +138,7 @@ Here is the rest. Move the existing bounded supplier-claim adjustment into the u
 ---
 
 pull and merge. Jonas pushed his stuff. Make sure everything works together. When finished create the graph again what is left to do.
+
+---
+
+Did you push? If now push so Jonas can pull.
