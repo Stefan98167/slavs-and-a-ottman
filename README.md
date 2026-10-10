@@ -22,3 +22,7 @@ There is no application to run yet. Once the team chooses a stack, document the 
 ## Team and contributions
 
 Add team members, roles, and contribution guidance here. During the hackathon, keep this README updated with the project idea, implemented features, and instructions for trying the latest build.
+
+## Agent session tracking
+
+This repository uses [Entire](https://entire.io/) to save coding-agent session context alongside Git history. Contributors using Codex can install the Entire CLI, run `entire enable` in the repository, and review the repository's hooks with `/hooks` before trusting them. Check the setup with `entire status`.
