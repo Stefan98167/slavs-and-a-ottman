@@ -1,0 +1,87 @@
+<div id="architecture-progress-map" role="img" aria-label="Negotiation-agent architecture progress map. Green nodes are implemented, amber nodes are partial, and red nodes are not built.">
+  <style>
+    #architecture-progress-map { color: var(--foreground); font-family: inherit; }
+    #architecture-progress-map .title { margin: 0 0 6px; font-weight: 500; }
+    #architecture-progress-map .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px; font-size: 12px; color: var(--muted-foreground); }
+    #architecture-progress-map .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    #architecture-progress-map .swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+    #architecture-progress-map .swatch.done { background: var(--green); }
+    #architecture-progress-map .swatch.partial { background: var(--orange); }
+    #architecture-progress-map .swatch.missing { background: var(--red); }
+    #architecture-progress-map svg { display: block; width: 100%; height: auto; overflow: visible; }
+    #architecture-progress-map .edge { fill: none; stroke: var(--border); stroke-width: 1.5; marker-end: url(#apm-arrow); }
+    #architecture-progress-map .loop { fill: none; stroke: var(--border); stroke-width: 1.5; marker-end: url(#apm-arrow); }
+    #architecture-progress-map .node rect { stroke-width: 1.5; rx: 11px; ry: 11px; }
+    #architecture-progress-map .node.done rect { fill: color-mix(in srgb, var(--green) 17%, var(--background)); stroke: var(--green); }
+    #architecture-progress-map .node.partial rect { fill: color-mix(in srgb, var(--orange) 17%, var(--background)); stroke: var(--orange); }
+    #architecture-progress-map .node.missing rect { fill: color-mix(in srgb, var(--red) 14%, var(--background)); stroke: var(--red); }
+    #architecture-progress-map .node text { fill: var(--foreground); font-size: 13px; font-weight: 500; text-anchor: middle; }
+    #architecture-progress-map .node .small { font-size: 11px; font-weight: 400; fill: var(--muted-foreground); }
+    #architecture-progress-map .node .status { font-size: 11px; font-weight: 500; }
+    #architecture-progress-map .node.done .status { fill: var(--green); }
+    #architecture-progress-map .node.partial .status { fill: var(--orange); }
+    #architecture-progress-map .node.missing .status { fill: var(--red); }
+    #architecture-progress-map .edge-label { fill: var(--muted-foreground); font-size: 11px; text-anchor: middle; }
+    @media (max-width: 560px) {
+      #architecture-progress-map .node text { font-size: 11px; }
+      #architecture-progress-map .node .small, #architecture-progress-map .node .status, #architecture-progress-map .edge-label { font-size: 9px; }
+    }
+  </style>
+
+  <h3 class="title">Negotiation architecture — implementation map</h3>
+  <div class="legend" aria-label="Status legend">
+    <span><i class="swatch done"></i> Implemented</span>
+    <span><i class="swatch partial"></i> Partial / not connected</span>
+    <span><i class="swatch missing"></i> Not built</span>
+  </div>
+
+  <svg viewBox="0 0 980 850" aria-labelledby="apm-title apm-desc">
+    <title id="apm-title">Negotiation architecture progress</title>
+    <desc id="apm-desc">A flow diagram from case opening through buyer cost, supplier intelligence, package selection, negotiation, RFQ comparison, and closure. Status colours indicate implementation maturity.</desc>
+    <defs>
+      <marker id="apm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)"></path></marker>
+    </defs>
+
+    <path class="edge" d="M490 82 V112" />
+    <path class="edge" d="M490 178 V212 H245 V244" />
+    <path class="edge" d="M490 178 V212 H490 V244" />
+    <path class="edge" d="M245 316 V348" />
+    <path class="edge" d="M490 316 V348" />
+    <path class="edge" d="M245 420 V452 H490 V484" />
+    <path class="edge" d="M490 420 V484" />
+    <path class="edge" d="M490 556 V588" />
+    <path class="edge" d="M490 660 V692" />
+    <path class="edge" d="M490 764 V796 H700" />
+    <path class="loop" d="M398 640 H82 V280 H118" />
+    <text class="edge-label" x="204" y="272">update profile</text>
+
+    <path class="edge" d="M760 178 V244" />
+    <path class="edge" d="M760 316 V348" />
+    <path class="edge" d="M760 420 V452" />
+    <path class="edge" d="M700 556 H648 V744 H625" />
+    <path class="edge" d="M820 556 H870 V744 H895" />
+    <path class="edge" d="M760 620 V692" />
+    <text class="edge-label" x="677" y="733">moves remain</text>
+    <text class="edge-label" x="847" y="733">no moves</text>
+
+    <g class="node done"><rect x="370" y="18" width="240" height="64" /><text x="490" y="46">Case opens</text><text class="status" x="490" y="67">IMPLEMENTED</text></g>
+    <g class="node partial"><rect x="350" y="112" width="280" height="66" /><text x="490" y="140">Read case, quote PDF, trigger</text><text x="490" y="157">and supplier documents</text><text class="status" x="490" y="171">PARTIAL</text></g>
+
+    <g class="node done"><rect x="105" y="244" width="280" height="72" /><text x="245" y="273">Buyer-cost engine</text><text class="small" x="245" y="290">C · must-haves · alternative</text><text class="status" x="245" y="306">IMPLEMENTED</text></g>
+    <g class="node missing"><rect x="350" y="244" width="280" height="72" /><text x="490" y="273">Supplier profile</text><text class="small" x="490" y="290">cash · capacity · quality · rigidity</text><text class="status" x="490" y="306">NOT BUILT — CURRENTLY UNKNOWN</text></g>
+
+    <g class="node partial"><rect x="105" y="348" width="280" height="72" /><text x="245" y="377">Generate valid term packages</text><text class="small" x="245" y="394">LLM can propose; no optimiser</text><text class="status" x="245" y="410">PARTIAL</text></g>
+    <g class="node missing"><rect x="350" y="348" width="280" height="72" /><text x="490" y="377">Rank supplier hypotheses</text><text class="small" x="490" y="394">what might they value most?</text><text class="status" x="490" y="410">NOT BUILT</text></g>
+
+    <g class="node partial"><rect x="350" y="484" width="280" height="72" /><text x="490" y="513">Choose up to 3 packages</text><text class="small" x="490" y="530">protocol supports it; no strategy</text><text class="status" x="490" y="546">PARTIAL</text></g>
+    <g class="node partial"><rect x="350" y="588" width="280" height="72" /><text x="490" y="617">Send evidence-backed email</text><text class="small" x="490" y="634">with a reciprocal trade</text><text class="status" x="490" y="650">PARTIAL</text></g>
+    <g class="node done"><rect x="350" y="692" width="280" height="72" /><text x="490" y="721">Supplier response</text><text class="small" x="490" y="738">counteroffer · status · documents</text><text class="status" x="490" y="754">IMPLEMENTED</text></g>
+
+    <g class="node partial"><rect x="640" y="112" width="240" height="66" /><text x="760" y="140">RFQ: loop per supplier</text><text class="small" x="760" y="157">cases parallel; threads serial</text><text class="status" x="760" y="171">PARTIAL</text></g>
+    <g class="node partial"><rect x="640" y="244" width="240" height="72" /><text x="760" y="273">Compare standing offers</text><text class="small" x="760" y="290">by total cost C</text><text class="status" x="760" y="306">PARTIAL — DEADLINE ONLY</text></g>
+    <g class="node missing"><rect x="640" y="348" width="240" height="72" /><text x="760" y="377">Offer beats alternative</text><text class="small" x="760" y="394">and improvement is small?</text><text class="status" x="760" y="410">NOT BUILT AS POLICY</text></g>
+    <g class="node partial"><rect x="640" y="452" width="240" height="104" /><text x="760" y="482">Moves left?</text><text class="small" x="760" y="500">counted, but not used for</text><text class="small" x="760" y="516">strategic planning</text><text class="status" x="760" y="539">PARTIAL</text></g>
+    <g class="node partial"><rect x="510" y="744" width="240" height="72" /><text x="630" y="773">Continue negotiation</text><text class="small" x="630" y="790">re-plan from evidence</text><text class="status" x="630" y="806">PARTIAL</text></g>
+    <g class="node partial"><rect x="775" y="744" width="180" height="72" /><text x="865" y="773">Accept or walk away</text><text class="small" x="865" y="790">valid lowest-C offer</text><text class="status" x="865" y="806">PARTIAL</text></g>
+  </svg>
+</div>
