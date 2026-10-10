@@ -248,7 +248,8 @@ def test_play_waves_waits_for_each_wave(sim):
 def test_play_closes_before_the_cap(sim):
     url, _, _ = sim
     client = team(url)
-    result = play(RemoteTable(client), "case:S01", NaiveAgent(), deadline=time.time())
+    # Leave enough time to open the session; a known expired cap must not start a request.
+    result = play(RemoteTable(client), "case:S01", NaiveAgent(), deadline=time.time() + 5)
     assert result["ended"] and result["deal"]  # the opening beats having no alternative
     assert client.session(client.sessions()[0]["session_id"])["rounds"] == 0
 

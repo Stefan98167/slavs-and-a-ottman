@@ -89,7 +89,12 @@ class ArenaClient:
         if remaining <= 0.05:
             raise httpx.TimeoutException("wave deadline reached before HTTP request")
         attempts_left = self.retries + 1
-        retry_budget = MAX_RETRY_AFTER_S * max(0, attempts_left - 1)
+        while attempts_left > 1:
+            retry_budget = MAX_RETRY_AFTER_S * (attempts_left - 1)
+            if remaining - retry_budget - 0.05 >= 0.04 * attempts_left:
+                break
+            attempts_left -= 1
+        retry_budget = MAX_RETRY_AFTER_S * (attempts_left - 1)
         phase = min(self.timeout, max(0.01, remaining - retry_budget - 0.05) / (4 * attempts_left))
         return httpx.Timeout(connect=phase, read=phase, write=phase, pool=phase)
 
