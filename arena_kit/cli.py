@@ -26,9 +26,12 @@ def load_env(path=".env"):
                 os.environ.setdefault(key.strip(), value)
 
 
-def agent_factory(name, data):
-    from .agents import LLMAgent, NaiveAgent, llm_from_env
+def agent_factory(name, data, evidence=None):
+    from .agents import DummyAgent, LLMAgent, NaiveAgent, llm_from_env
 
+    if name == "dummy":
+        records = json.loads(Path(evidence).read_text(encoding="utf-8-sig")) if evidence else []
+        return lambda: DummyAgent(records)
     if name == "naive":
         return NaiveAgent
     package = None
@@ -65,14 +68,21 @@ def main(argv=None):
     c.add_argument("--set", **sets)
     p = sub.add_parser("play", help="play one case")
     p.add_argument("case_id")
-    p.add_argument("--agent", default="naive", choices=["naive", "llm"])
+    p.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy"])
+    p.add_argument("--evidence", type=Path, help="Extractor JSON with priorities, for --agent dummy")
     p.add_argument("--data", **data)
     a = sub.add_parser("run", help="play every case of a set in parallel")
     a.add_argument("--set", **sets)
-    a.add_argument("--agent", default="naive", choices=["naive", "llm"])
+    a.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy"])
+    a.add_argument("--evidence", type=Path, help="Extractor JSON with priorities, for --agent dummy")
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed")
+    s = sub.add_parser("simulate", help="run a negotiation entirely locally, without HTTP or model calls")
+    s.add_argument("case_id", nargs="?", default="case:S01")
+    s.add_argument("--agent", choices=["dummy", "naive"], default="dummy")
+    s.add_argument("--evidence", type=Path, help="Extractor JSON with priorities for the dummy")
+    s.add_argument("--out", type=Path, help="Save result, messages and dummy decisions as JSON")
     d = sub.add_parser("data", help="download and unpack the data (package, Sunday release once public)")
     d.add_argument("--out", default="data", help="folder to unpack into")
     sub.add_parser("me", help="your team: practice quota used and left, best score per case")
@@ -91,6 +101,26 @@ def main(argv=None):
         from .mcp_server import main as serve
 
         return serve(args.data)
+    if args.cmd == "simulate":
+        from .sim import SimTable
+
+        try:
+            agent = agent_factory(args.agent, None, args.evidence)()
+            table = SimTable()
+            result = play(table, args.case_id, agent)
+            session = table.sim.sessions[table.session_id]
+            output = {"mode": "simulation", "input_policy": "supplier_only" if args.agent == "dummy" else "legacy",
+                      "case_id": args.case_id, "result": result,
+                      "threads": {sid: thread["messages"] for sid, thread in session["threads"].items()},
+                      "decisions": getattr(agent, "decision_history", [])}
+            if args.out:
+                if args.evidence and args.out.resolve() == args.evidence.resolve():
+                    ap.error("Output file must differ from the evidence file")
+                args.out.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(json.dumps(summary(result), indent=2))
+        except (ArenaError, OSError, ValueError) as exc:
+            ap.error(str(exc))
+        return
     client = ArenaClient()
     if args.cmd == "register":
         out = client.register(args.team_name, args.event_code)
@@ -119,7 +149,7 @@ def main(argv=None):
     elif args.cmd == "play":
         table = RemoteTable(client)
         try:
-            result = play(table, args.case_id, agent_factory(args.agent, args.data)())
+            result = play(table, args.case_id, agent_factory(args.agent, args.data, args.evidence)())
         except ArenaError as e:  # e.g. not hosted, the quota, a paused key: the arena says why
             raise SystemExit(str(e)) from None
         print(json.dumps(summary(result), indent=2))
@@ -127,13 +157,13 @@ def main(argv=None):
         if replay:  # the supplier's reasons, move by move: read it, improve, play again
             print(f"replay: {os.environ['ARENA_URL'].rstrip('/')}{replay}")
     elif args.set == "final":  # waits for each wave and plays its cases within the cap
-        out = play_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10))
+        out = play_waves(client, agent_factory(args.agent, args.data, args.evidence), args.waves, min(args.parallel, 10))
     else:
         ids = [case["case_id"] for case in hosted(client.cases(args.set))]
         out = play_all(
             lambda: RemoteTable(client),
             ids,
-            agent_factory(args.agent, args.data),
+            agent_factory(args.agent, args.data, args.evidence),
             min(args.parallel, 10),
         )
     if args.cmd == "run":
