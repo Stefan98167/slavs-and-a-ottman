@@ -1,0 +1,57 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4KD9NAMJFKAM86Y9SNP9Z68",
+  "session_id": "01a126a7-4207-7cf3-8fb7-5a8c6788f258",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-10T17:20:45.81345623Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "save_step_count": 1,
+  "files_touched": [
+    "README.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.6-terra",
+  "turn_id": "805c23117c66",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 248643,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10381603,
+    "output_tokens": 58115,
+    "api_call_count": 107
+  },
+  "session_metrics": {
+    "turn_count": 14
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-10T17:20:45.741483317Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 574,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 574,
+    "total_lines_changed": 680,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 2861,
+      "user_lines_removed": 7,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.json": 101,
+        ".codex/hooks.json": 7,
+        "architecture-progress-map.html": 87,
+        "architecture-progress-map.preview.html": 2666
+      },
+      "user_removed_per_file": {
+        ".codex/hooks.json": 7
+      }
+    }
+  ]
+}

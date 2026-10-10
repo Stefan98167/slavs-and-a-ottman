@@ -1,0 +1,57 @@
+can you push. first check all conflicts and so on
+
+---
+
+[Image #1] how far are we to reaching this architecture or at lease the mvp? check all md files to gain context
+
+---
+
+Can you make a graph from the one that I sent you where you visualize what is done and what not
+
+---
+
+Where can I see it? Now I just see text. I want to see a graph
+
+---
+
+Export it as png and I will open the file.
+
+---
+
+Let's do Generate valid term packages next. Ask for any context you need. I mean you know how all of this works thourgh the md files
+
+---
+
+Yes do what you recommend
+
+---
+
+What did we actually do here? And what is left to do in this step? What is the step?
+
+---
+
+Do what is left. If you need context ask
+
+---
+
+What is left? My part right now are those from the screenshot [Image #1]
+
+---
+
+Ok what do you recommend to do next
+
+---
+
+First of all pull from github and merge, my friend finished something
+
+---
+
+Did he cook with his work? Is it good? What did he do from the graph
+
+---
+
+do one test in the real arena just to test. maybe p10. use .env and tell me the score
+
+---
+
+pull and merge. think before merging and ask if you dont know something
