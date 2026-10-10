@@ -63,3 +63,19 @@ so push now so he can pull
 ---
 
 Generate a new graph what we already have and what is missing
+
+---
+
+Check origin if needed pull and merge. Think. Dont make mistakes.
+
+---
+
+Is everything connected now?
+
+---
+
+Can I connect them now or should I not do it?
+
+---
+
+Can you please connect them and try with P10?
