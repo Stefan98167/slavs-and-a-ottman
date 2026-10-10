@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4M0HRJGKEBJXC1VMKHFY3RN",
+  "strategy": "manual-commit",
+  "branch": "integration/final",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "arena_kit/agents/unified.py",
+    "negotiator/case_evidence.py",
+    "negotiator/offer_restoration.py",
+    "negotiator/proposal_safety.py",
+    "negotiator/response_signal.py",
+    "negotiator/response_trades.py",
+    "negotiator/supplier_alternatives.py",
+    "negotiator/supplier_economics.py",
+    "negotiator/term_repair.py",
+    "scripts/calibrate_relationship.py",
+    "tests/test_case_evidence.py",
+    "tests/test_supplier_economics.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2809926,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 108366056,
+    "output_tokens": 671810,
+    "api_call_count": 964
+  }
+}
