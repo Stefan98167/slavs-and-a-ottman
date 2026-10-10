@@ -39,3 +39,7 @@ What is left? My part right now are those from the screenshot [Image #1]
 ---
 
 Ok what do you recommend to do next
+
+---
+
+First of all pull from github and merge, my friend finished something
