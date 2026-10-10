@@ -7,6 +7,7 @@ from arena_kit.docs import standard_terms
 from arena_kit.play import latest, live_threads, standing
 
 from .policy import SupplierOnlyPolicy
+from .supplier_evidence import build_thread_supplier_context, context_for_part
 
 
 _PRICE = re.compile(r"^\+?\d+(?:[.,]\d+)?$")
@@ -55,24 +56,10 @@ def _previous_buyer_price(events):
     return None
 
 
-def _csv_context(events, part_id=None):
-    """Find unambiguous, supplier-scoped CSV context from this thread."""
-    contexts = []
-    for event in events:
-        if event.get("from") == "buyer":
-            continue
-        for attachment in event.get("attachments") or []:
-            if attachment.get("csv_parse_error"):
-                continue
-            bundle = attachment.get("supplier_context") or {}
-            contexts.extend(bundle.get("contexts") or [])
-    if part_id is not None:
-        matching = [context for context in contexts if context.get("part_id") == part_id]
-        return matching[0] if len(matching) == 1 else None
-    if len(contexts) == 1:
-        return contexts[0]
-    unscoped = [context for context in contexts if context.get("part_id") is None]
-    return unscoped[0] if len(unscoped) == 1 else None
+def _supplier_context(events, supplier_id, part_id=None):
+    """Build one context from this supplier's entire PDF/CSV/message history."""
+    bundle = build_thread_supplier_context(events, supplier_id, part_id)
+    return context_for_part(bundle, part_id)
 
 
 def _lead_source(context):
@@ -85,11 +72,14 @@ def _lead_source(context):
 
 
 def _top_argument(context):
-    """Return the supplier's highest-ranked explicit evidence row, without inference."""
+    """Return the highest-ranked supplier claim before a quote row, without inference."""
     if not context:
         return None
     evidence = [item for item in context.get("evidence", []) if isinstance(item, dict)]
-    evidence.sort(key=lambda item: item.get("priority") if type(item.get("priority")) is int else 99)
+    evidence.sort(key=lambda item: (
+        item.get("priority") if type(item.get("priority")) is int else 99,
+        0 if item.get("kind") == "claim" else 1,
+    ))
     return evidence[0] if evidence else None
 
 
@@ -156,8 +146,12 @@ def _argument_text(context):
     if not item:
         return None
     data = item.get("data") or {}
-    # Keep the exact supplier-provided fields and values visible in the negotiation.
-    details = "; ".join(f"{key}: {value}" for key, value in list(data.items())[:4])
+    if item.get("kind") == "claim" and data.get("claim_text"):
+        details = str(data["claim_text"])
+    else:
+        ignored = {"kind", "id", "offer_id", "claim_id", "supplier_id", "part_id",
+                   "source_refs", "term_sections", "terms"}
+        details = "; ".join(f"{key}: {value}" for key, value in data.items() if key not in ignored)
     if not details:
         return None
     return re.sub(r"[\r\n\x00-\x1f]+", " ", details)[:240]
@@ -198,7 +192,7 @@ class SupplierContextAgent:
             rounds = sum(event.get("from") == "buyer" for event in events)
             is_final = latest(events).get("status") == "final_offer"
             std = standard_terms(events)
-            context = _csv_context(events, terms.get("part_id"))
+            context = _supplier_context(events, supplier_id, terms.get("part_id"))
             evidence_terms = _evidence_terms(context)
             required = set(terms) | set(evidence_terms)
             for event in events:

@@ -131,56 +131,13 @@ def extract_supplier_context(csvs, *, supplier_id=None, part_id=None, delimiter=
     produce separate contexts. For ambiguous part data, pass an explicit part scope.
     The returned object contains the original extracted rows and auditable contexts.
     """
-    from negotiator.intelligence import (
-        EvidenceInputError,
-        bind_evidence_scope,
-        build_supplier_context,
-        load_evidence,
-    )
+    from negotiator.intelligence import EvidenceInputError, contexts_from_records
 
     records = extract(csvs, delimiter=delimiter, encoding=encoding, priority=priority,
                       complete=complete, priority_context=priority_context, progress=progress)
-    evidence = load_evidence(records)
     if supplier_id is None:
         raise EvidenceInputError("supplier_id from the live negotiation thread is required for context output")
-    if not isinstance(supplier_id, str) or not supplier_id.strip():
-        raise EvidenceInputError("supplier_id must be a non-empty string")
-
-    # A supplier's own identifiers are not necessarily Arena identities. The
-    # uploaded attachment is scoped by its live thread; preserve conflicting CSV
-    # identifiers as evidence, then bind the live identity for context grouping.
-    for record in evidence:
-        information = record["data"]
-        csv_supplier_id = record.get("supplier_id")
-        if csv_supplier_id not in (None, supplier_id):
-            information["supplier_reported_supplier_id"] = csv_supplier_id
-            information.pop("supplier_id", None)
-            record["supplier_id"] = None
-        csv_part_id = record.get("part_id")
-        if part_id is not None and csv_part_id not in (None, part_id):
-            information["supplier_reported_part_id"] = csv_part_id
-            information.pop("part_id", None)
-            record["part_id"] = None
-
-    try:
-        evidence = bind_evidence_scope(evidence, supplier_id, part_id)
-    except EvidenceInputError as exc:
-        raise ValueError(str(exc)) from exc
-
-    parts = {record.get("part_id") for record in evidence if record.get("part_id")}
-    has_unscoped_part = any(not record.get("part_id") for record in evidence)
-    if part_id is not None:
-        contexts = [build_supplier_context(evidence, supplier_id, part_id)]
-    elif len(parts) > 1:
-        if has_unscoped_part:
-            raise EvidenceInputError(
-                "CSV rows identify multiple parts and some rows have no part ID; pass part_id to scope this upload"
-            )
-        contexts = [build_supplier_context(evidence, supplier_id, part)
-                    for part in sorted(parts, key=str)]
-    else:
-        inferred_part = next(iter(parts), None)
-        contexts = [build_supplier_context(evidence, supplier_id, inferred_part)]
+    contexts = contexts_from_records(records, supplier_id, part_id)
 
     return {
         "schema": "supplier_context_v1",
