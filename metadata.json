@@ -3,13 +3,19 @@
   "checkpoint_id": "01M4K97WMWWWP273DDZPKG5BTM",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
     "MVP_EVALUATOR.md",
+    "MVP_INTELLIGENCE.md",
+    "README.md",
     "negotiator/__init__.py",
     "negotiator/demo_evaluator.py",
+    "negotiator/demo_intelligence.py",
     "negotiator/evaluator.py",
-    "tests/test_evaluator.py"
+    "negotiator/intelligence.py",
+    "tests/fixtures/intelligence_quotes.json",
+    "tests/test_evaluator.py",
+    "tests/test_intelligence.py"
   ],
   "sessions": [
     {
@@ -18,14 +24,21 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 58087,
+    "input_tokens": 89764,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 619520,
-    "output_tokens": 11533,
-    "api_call_count": 16,
+    "cache_read_tokens": 943360,
+    "output_tokens": 22581,
+    "api_call_count": 27,
     "subagent_tokens_complete": true
   }
 }

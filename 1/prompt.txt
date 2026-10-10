@@ -1,0 +1,97 @@
+Work in `/home/stefan/dev/hackathon/slavs-and-a-ottman`.
+
+The existing `negotiator/evaluator.py` is complete for the first MVP. Do not modify its behaviour unless a small bug prevents integration.
+
+Build the next small component: an ingestion and supplier-context layer for the data-analysis team’s JSON output.
+
+The current input format is a JSON array. Each record has this exact shape:
+
+```json
+{
+  "Information": {
+    "id": "quote:7100001",
+    "supplier_id": "sup:70110",
+    "part_id": "part:310010",
+    "quote_date": "2025-01-22",
+    "unit_price": "142.5",
+    "price_unit": "1",
+    "currency": "EUR",
+    "lead_time_days": "49",
+    "incoterm": "FCA",
+    "payment_days": "30",
+    "validity_days": "30",
+    "tooling_eur": "0",
+    "awarded": "true",
+    "missing_fields": "",
+    "remarks": ""
+  },
+  "Source": "data/data/quotes.csv:2",
+  "Priority (Argument wise)": 1
+}
+```
+
+The first real sample is at `/home/stefan/Downloads/output.json`. It currently contains historical quotes only. Future JSON may contain other kinds of evidence, so make the reader tolerant of records with different `Information` fields.
+
+Create `negotiator/intelligence.py` with functions that:
+
+1. Load and validate the JSON array from a path or already-loaded Python list.
+2. Normalize common values safely:
+   - numeric strings such as `"142.5"` to numbers;
+   - `"true"` / `"false"` to booleans;
+   - retain source IDs, source path, priority, and all unknown fields.
+3. Filter evidence by `supplier_id` and optional `part_id`.
+4. Build a JSON-serializable supplier context for a supplier and part.
+
+Use an output shape close to:
+
+```json
+{
+  "supplier_id": "sup:70110",
+  "part_id": "part:310010",
+  "evidence": [
+    {
+      "id": "quote:7100001",
+      "kind": "quote",
+      "source": "data/data/quotes.csv:2",
+      "priority": 1,
+      "data": {}
+    }
+  ],
+  "quote_history": {
+    "count": 1,
+    "latest_quote_date": "2025-01-22",
+    "latest_unit_price": 142.5,
+    "min_unit_price": 142.5,
+    "max_unit_price": 142.5,
+    "awarded_quote_count": 1
+  },
+  "supplier_profile": {
+    "cash_sensitive": {"state": "unknown", "confidence": 0.0},
+    "capacity_sensitive": {"state": "unknown", "confidence": 0.0},
+    "price_rigid": {"state": "unknown", "confidence": 0.0},
+    "quality_sensitive": {"state": "unknown", "confidence": 0.0}
+  },
+  "evidence_gaps": [
+    "No payment, financial, document, capacity, or quality evidence is available in this input."
+  ]
+}
+```
+
+Important constraints:
+
+- Historical quotes alone must not be used to infer cash pressure, capacity pressure, or quality sensitivity.
+- Do not use an LLM.
+- Do not create packages or emails yet.
+- Preserve traceability: every derived fact must retain the original evidence ID and source.
+- Be tolerant of incomplete or future evidence types; ignore unknown fields rather than failing.
+- Raise a clear custom error for invalid top-level JSON, such as a non-array document.
+- Keep the code deterministic and JSON-serializable.
+
+Add:
+
+- `negotiator/demo_intelligence.py`, runnable against `/home/stefan/Downloads/output.json`;
+- focused pytest tests using a small committed fixture under `tests/fixtures/`, not the full Downloads file;
+- `MVP_INTELLIGENCE.md` explaining the current input format, output format, limitation of quote-only evidence, and how future data types can extend the profile;
+- an update to the project README pointing to both MVP components.
+
+Run the relevant tests and report created files, tests, and assumptions. Do not modify `data/`, `brief/`, or starter-kit logic.

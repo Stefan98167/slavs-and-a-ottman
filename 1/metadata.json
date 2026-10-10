@@ -1,0 +1,63 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4K97WMWWWP273DDZPKG5BTM",
+  "session_id": "01a12685-ccb1-75f0-80ab-14288d49e4f3",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-10T16:09:52.886499918Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "MVP_INTELLIGENCE.md",
+    "README.md",
+    "negotiator/demo_intelligence.py",
+    "negotiator/intelligence.py",
+    "tests/fixtures/intelligence_quotes.json",
+    "tests/test_intelligence.py"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.6-terra",
+  "turn_id": "31b7b8740fa5",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 31677,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 323840,
+    "output_tokens": 11048,
+    "api_call_count": 11,
+    "subagent_tokens_complete": true
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-10T16:09:52.870895704Z",
+    "agent_lines": 427,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 427,
+    "total_lines_changed": 427,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 564,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.json": 101,
+        ".codex/hooks.json": 88,
+        "MVP_EVALUATOR.md": 56,
+        "negotiator/__init__.py": 5,
+        "negotiator/demo_evaluator.py": 25,
+        "negotiator/evaluator.py": 220,
+        "tests/test_evaluator.py": 69
+      }
+    }
+  ]
+}
