@@ -1,6 +1,6 @@
 # MVP deterministic deal evaluator
 
-This is the first component of the negotiation agent only.  It evaluates one possible deal; it does not write e-mails, mine data, optimise a package, select a supplier, or run an arena.
+This is a separate evaluation prototype. It evaluates one possible deal using Arena case and buyer data; it is not part of the supplier-only CSV extraction path and does not write e-mails, mine supplier data, optimise a package, select a supplier, or run an arena.
 
 ## API
 

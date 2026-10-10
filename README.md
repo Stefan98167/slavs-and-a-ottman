@@ -4,44 +4,73 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 
 ## Negotiator MVP components
 
-- [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal.
-- [MVP intelligence](MVP_INTELLIGENCE.md): ingestion and traceable supplier context from the data-analysis team's JSON evidence output.
-- [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving conversion of supplier attachments into the shared evidence JSON format; optional priority ranking is available to the data-preparation team.
+- [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal using case and buyer data.
+- [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built directly from supplier CSV extracts.
+- [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving CSV parsing, with an option to pass parsed rows into the intelligence component.
 
 ## Supplier-only input policy
 
-The dummy uses only supplier-uploaded CSV/JSON and the live supplier's messages
-and attachments. It does not read buyer baselines, case facts, market indices,
-alternatives, company history or the buyer cost model. Known bundled `data/data/`
-sources are rejected. This also rejects the old `output.json` and `output_llm.json`
-generated from that directory. Extract new JSON from the supplier's actual files.
-A filename cannot establish provenance; callers must supply genuine supplier data.
+The supplier parser and intelligence component use only supplier-uploaded files and
+identities supplied by the caller from the live thread. Known bundled `data/data/`
+CSV sources are rejected. A filename cannot establish provenance; callers must
+supply genuine supplier data. The deal evaluator remains a separate MVP that reads
+case and buyer data; it is not used by supplier evidence extraction.
 
 ## Run locally (offline)
 
-The CSV extractor and static dummy decision engine need only Python's standard
+The CSV extractor and supplier intelligence path need only Python's standard
 library. Explicit supplier input is required; there is no demo-data fallback.
-Run commands from this repository's root (`slavs-and-a-ottman`).
+Run commands from this repository's root.
 
 ```bash
-# The file must be an actual supplier upload
-python -m arena_kit.quote_extract supplier_quote.csv > supplier_information.json
-python -m arena_kit.local --json supplier_information.json --out decisions.json
+# Extract rows and build auditable supplier context in one step
+python -m arena_kit.quote_extract supplier_quote.csv --context --supplier-id sup:from-live-thread > supplier_context.json
 
-# Or extract and decide in one step
-python -m arena_kit.local supplier_quote.csv --out decisions.json
+# If the upload contains multiple parts, the parser emits a context per part.
+# Scope a single-part attachment explicitly when its rows have no part IDs:
+python -m arena_kit.quote_extract supplier_quote.csv --context --supplier-id sup:from-live-thread --part-id part:from-live-thread > supplier_context.json
 ```
 
 ```python
-from arena_kit.local import run_local
+from arena_kit.quote_extract import extract_supplier_context
 
-result = run_local(["supplier_quote.csv"])
+result = extract_supplier_context(["supplier_quote.csv"], supplier_id="sup:from-live-thread")
 ```
 
-The static engine suggests 5% below each supplier quote. It orders decisions and
-supporting arguments by priority, selects a `lead_argument`, and produces a
-suggested `message`. Missing prices produce clarification requests. Records
-share arguments only with matching explicit supplier and part IDs.
+The resulting JSON contains the unchanged extracted `records` plus one or more
+`contexts`. Each context includes normalized evidence, quote history with source
+references, supplier profile fields, and evidence gaps. It does not invent buyer
+targets or supplier traits from quote history.
+
+During Arena sessions the runner parses incoming supplier CSV attachments and adds
+`csv_records` and `supplier_context` to that supplier's thread. The supplier agent
+reads those fields alongside the supplier's live offers.
+
+## Run the supplier-only agent
+
+The Arena-compatible `SupplierContextAgent` ignores the case argument and uses only
+live supplier messages, offers, and parsed supplier attachments. It carries explicit
+commercial values from supplier evidence into counteroffers, uses same-context
+supplier quote history as a price anchor when comparable, and moves its counter by a
+configurable share of each supplier concession. It also cites the supplier's
+highest-priority evidence in its rationale. It accepts offers that meet its target;
+when a supplier makes a final offer or the agent runs out of moves, it accepts the
+best complete standing offer as a last resort rather than walking away and scoring
+zero. It walks away only when no complete offer can be accepted. It does not infer
+buyer budgets or supplier traits that the input does not establish; profile dimensions
+in the current context remain unknown.
+
+```bash
+# Local scripted Arena simulation
+python -m arena_kit.cli simulate case:S01 --agent supplier --out negotiation.json -v
+
+# Hosted Arena practice session; .env needs ARENA_URL and the team's ARENA_API_KEY
+python -m arena_kit.cli play case:P01 --agent supplier
+```
+
+The Arena runner still downloads the supplier attachments and sends the agent's
+messages. A local simulation uses scripted supplier fixtures and is not a hosted
+session.
 
 ## LLM-generated extraction priorities
 
@@ -66,38 +95,15 @@ python -m arena_kit.quote_extract supplier_quote.csv --priority llm > supplier_i
 
 `prioritize(records, complete=my_llm_call, batch_size=25)` supports custom model
 callbacks. Invalid or incomplete responses raise errors. Heuristic extraction
-and the local decision runner do not make model calls.
+and supplier-context generation do not make model calls.
 
-## Negotiate with the supplier-only dummy
+## Deal evaluator status
 
-`DummyAgent` implements the existing `decide(case, threads)` interface but never
-reads `case`. The existing `play()` loop and simulator are reused. Its policy
-target is 5% below the supplier's opening price, with quoted standard terms kept
-as supplied. It requests missing terms, accepts prices within its target, and
-walks away if a final offer remains above it. Discount and maximum rounds are
-strategy settings, not external factual inputs. Part identity must come from
-the supplier offer or be unambiguous in that supplier's supplied records.
-
-```bash
-# Only the simulated supplier's live offers and attachments
-python -m arena_kit.cli simulate case:S01 --out negotiation_supplier_only.json -v
-
-# Add an actual supplier's extracted evidence
-python -m arena_kit.cli simulate case:S01 --evidence supplier_information.json --out negotiation.json -v
-
-python -m pytest tests/test_dummy_agent.py -v -s
-```
-
-The saved transcript contains supplier/buyer `threads`, per-round `decisions`,
-the supplier-derived target source, priorities, and the messages actually sent.
-The simulator uses case fixtures to generate supplier replies and calculate its
-score; these fixture facts and evaluation costs are not inputs to the dummy.
-This policy also applies to the dummy's deadline handler.
-
-The HTTP runner supports `play ... --agent dummy --evidence supplier_information.json`
-and uses `ARENA_URL`. Use `simulate` for a fully local run. The upstream naive and
-LLM example agents remain as legacy comparison implementations; the supplier-only
-policy described here applies to the dummy engine.
+`negotiator.evaluator.evaluate_deal()` evaluates one proposed term sheet using the
+arena case's buyer costs, must-haves, and alternative. It is not a supplier-only
+negotiation agent and is not called by the CSV parser or the existing `play()` loop.
+Do not use it as a supplier-only decision policy without first changing its inputs
+and cost model.
 
 ## Run local negotiations with the provided tests
 
@@ -125,9 +131,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install httpx openpyxl pypdf fastapi uvicorn pytest
 ```
 
-`test_both_agents_play_unchanged` exercises the naive and scripted LLM agents;
-`tests/test_dummy_agent.py` exercises the integrated dummy. The localhost simulator
-implements the negotiation API and scripted supplier replies; it does not
+`test_both_agents_play_unchanged` exercises the naive and scripted LLM agents. The
+localhost simulator implements the negotiation API and scripted supplier replies; it does not
 reproduce the hosted suppliers' strategy.
 
 ## Run the hosted baseline agent
@@ -141,7 +146,7 @@ uv run arena me
 uv run arena play case:P01
 ```
 
-`arena me` checks the arena key and quota. `arena play` starts a hosted practice session and uses one session from the team's rolling 24-hour quota. The default agent is the naive baseline in `arena_kit/agents/naive.py`.
+`arena me` checks the arena key and quota. `arena play` starts a hosted practice session and uses one session from the team's rolling 24-hour quota. The default agent is the supplier-only `SupplierContextAgent`; pass `--agent naive` or `--agent llm` only to run a legacy comparison agent.
 
 To download the data package for the LLM agent and local data tools:
 
