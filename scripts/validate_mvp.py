@@ -1,0 +1,205 @@
+"""Local comparisons, three random hosted runs, or the complete ten-case set.
+
+Run from the repository root: python -m scripts.validate_mvp --mode local|hosted.
+This script never changes strategy, selects replacements, or reads final feeds.
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import random
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from pathlib import Path
+
+from arena_kit.cli import agent_factory, load_env
+from arena_kit.client import ArenaClient
+from arena_kit.cost import must_haves_ok
+from arena_kit.play import RemoteTable, hosted, play
+from arena_kit.sim import SimTable
+from negotiator.evaluator import evaluate_deal
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def source_version():
+    digest = hashlib.sha256()
+    files = sorted(p for folder in ("arena_kit", "negotiator", "scripts", "tests")
+                   for p in (ROOT / folder).rglob("*") if p.suffix in {".py", ".json"})
+    files.append(ROOT / "pyproject.toml")
+    for path in files:
+        digest.update(str(path.relative_to(ROOT)).encode() + b"\0" + path.read_bytes())
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    return {"head": head, "source_sha256": digest.hexdigest(), "working_tree": True}
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+
+
+def audit_decisions(case, decisions):
+    errors = []
+    for index, decision in enumerate(decisions):
+        msg = decision.get("message", {})
+        sheets = msg.get("term_sheets") or []
+        if len(sheets) > 3 or len(msg.get("body", "")) > 8000:
+            errors.append(f"decision {index}: Arena size limit")
+        standard = decision.get("supplier_standard_terms") or {}
+        for sheet in sheets:
+            terms = sheet["terms"]
+            evaluated = evaluate_deal(case, terms, standard)
+            if set(terms) != set(case["negotiable"]) or not evaluated["valid_for_negotiation"]:
+                errors.append(f"decision {index}: invalid sheet")
+            if evaluated["buyer"]["total_cost"] > decision.get("reservation_cost", float("inf")) + 0.01:
+                errors.append(f"decision {index}: proposal exceeds reservation")
+        if decision.get("action") == "accept":
+            if decision["standing_total_cost"] > decision["reservation_cost"] + 0.01:
+                errors.append(f"decision {index}: acceptance exceeds reservation")
+            if not must_haves_ok(case, decision["accepted_terms"], standard):
+                errors.append(f"decision {index}: accepted must-have violation")
+        for trade in decision.get("trade_hypotheses", []):
+            if not trade.get("evidence") or any(not e.get("id") or not e.get("source") for e in trade["evidence"]):
+                errors.append(f"decision {index}: unsourced trade")
+    return errors
+
+
+def reconcile_cost(result, decisions):
+    """Post-run observation only; never feeds hidden supplier economics to policy."""
+    accepted = [decision for decision in decisions if decision.get("action") == "accept"]
+    if not result or not result.get("deal") or not accepted:
+        return None
+    decision = accepted[-1]
+    expected = decision.get("predicted_cost_breakdown") or {}
+    actual = result.get("cost_breakdown") or {}
+    return {"predicted": decision["standing_total_cost"], "actual": result["c_deal"],
+            "difference": round(result["c_deal"] - decision["standing_total_cost"], 2),
+            "component_differences": {key: round(value - expected.get(key, 0), 2)
+                                      for key, value in actual.items()} if expected else None,
+            "note": "Server cost is authoritative; missing supplier economics are not inferred."}
+
+
+def select_cases(cases, seed, selection="random"):
+    eligible = sorted(hosted(cases), key=lambda case: case["case_id"])
+    if len({case["case_id"] for case in eligible}) != len(eligible):
+        raise ValueError("duplicate eligible case IDs")
+    if selection == "all":
+        if len(eligible) != 10:
+            raise ValueError("full-suite benchmark requires exactly ten eligible hosted cases")
+        return eligible, list(eligible)
+    if selection != "random":
+        raise ValueError("unknown selection mode")
+    if len(eligible) < 3:
+        raise ValueError("fewer than three eligible hosted cases")
+    return eligible, random.Random(seed).sample(eligible, 3)
+
+
+def local_runs(factory, out):
+    records = []
+    for name in ("unified", "supplier", "packages", "advanced"):
+        for case_id in ("case:S01", "case:S02", "case:S03"):
+            agent = factory() if name == "unified" else agent_factory(name, None)()
+            table = SimTable()
+            result = play(table, case_id, agent)
+            session = table.sim.sessions[table.session_id]
+            decisions = getattr(agent, "decision_history", [])
+            record = {"case_id": case_id, "agent": name, "result": result,
+                      "threads": {sid: thread["messages"] for sid, thread in session["threads"].items()},
+                      "decisions": decisions,
+                      "audit_errors": audit_decisions(session["case"], decisions) if name == "unified" else []}
+            records.append(record)
+            write_json(out / f"{name}-{case_id.split(':')[-1]}.json", record)
+            print(json.dumps({"agent": name, "case": case_id, "score": result.get("score"),
+                              "deal": result.get("deal"), "audit_errors": record["audit_errors"]}), flush=True)
+    return records
+
+
+def hosted_run(client, factory, case, out):
+    agent, table = factory(), RemoteTable(client, case)
+    record = {"case_id": case["case_id"], "agent": "unified", "case": case}
+    try:
+        record["result"] = play(table, case["case_id"], agent)
+    except Exception as exc:
+        record["run_error"] = f"{type(exc).__name__}: {exc}"
+        # Recover the same session, never consume an extra practice attempt.
+        if table.session_id:
+            try:
+                state = client.session(table.session_id)
+                if state.get("status") == "open":
+                    threads = table.refresh_threads({})
+                    close = agent.close(case, threads)
+                    record["result"] = table.close(close["supplier_id"], close["message"])
+                    record["recovered_by_safe_close"] = True
+                else:
+                    record["result"] = state.get("result")
+            except Exception as recovery:
+                record["recovery_error"] = f"{type(recovery).__name__}: {recovery}"
+    record["session_id"] = table.session_id
+    if table.session_id:
+        try:
+            state = client.session(table.session_id)
+            record["session_status"] = state.get("status")
+            record["replay_url"] = state.get("replay_url")
+            record["threads"] = {sid: client.thread(table.session_id, sid) for sid in state.get("threads", {})}
+        except Exception as exc:
+            record["replay_fetch_error"] = f"{type(exc).__name__}: {exc}"
+    record["decisions"] = agent.decision_history
+    record["cost_reconciliation"] = reconcile_cost(record.get("result"), agent.decision_history)
+    record["evidence_warnings"] = agent.evidence_warnings
+    record["timeout_counts"] = {sid: len(thread.get("timeouts") or [])
+                                for sid, thread in record.get("threads", {}).items()}
+    record["audit_errors"] = audit_decisions(case, agent.decision_history)
+    write_json(out / f"unified-{case['case_id'].split(':')[-1]}.json", record)
+    result = record.get("result") or {}
+    print(json.dumps({"case": case["case_id"], "session_id": table.session_id,
+                      "score": result.get("score"), "deal": result.get("deal"),
+                      "replay_url": record.get("replay_url"), "audit_errors": record["audit_errors"],
+                      "timeout_counts": record["timeout_counts"],
+                      "run_error": record.get("run_error")}), flush=True)
+    return record
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("local", "hosted"), required=True)
+    parser.add_argument("--data", default="data")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--selection", choices=("random", "all"), default="random")
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    if (args.out / "run.json").exists():
+        raise ValueError("output already contains a run; choose a new directory to preserve evidence")
+    manifest = {"mode": args.mode, "started_at": datetime.now(UTC).isoformat(), **source_version()}
+    factory = agent_factory("unified", args.data)
+    if args.mode == "local":
+        records = local_runs(factory, args.out)
+    else:
+        load_env()
+        client = ArenaClient()
+        quota = client.me().get("practice", {})
+        seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2**32)
+        eligible, selected = select_cases(client.cases("practice"), seed, args.selection)
+        if quota.get("left", 0) < len(selected):
+            raise ValueError("insufficient practice sessions for the requested complete batch")
+        manifest.update(seed=seed, selection=args.selection, quota_before=quota,
+                        population=[case["case_id"] for case in eligible],
+                        selected=[case["case_id"] for case in selected])
+        write_json(args.out / "run.json", manifest)  # Persist before the first POST.
+        print(json.dumps({"seed": seed, "selected": manifest["selected"]}), flush=True)
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(hosted_run, client, factory, case, args.out) for case in selected]
+            records = [future.result() for future in as_completed(futures)]
+        client.http.close()
+    manifest["finished_at"] = datetime.now(UTC).isoformat()
+    manifest["results"] = [{key: record.get(key) for key in
+                            ("case_id", "agent", "result", "audit_errors", "session_id",
+                             "replay_url", "run_error", "timeout_counts")}
+                           for record in records]
+    write_json(args.out / "run.json", manifest)
+
+
+if __name__ == "__main__":
+    main()

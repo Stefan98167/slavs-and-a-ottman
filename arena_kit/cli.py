@@ -40,7 +40,13 @@ def agent_factory(name, data):
     if name == "packages":
         return PackageAgent
     if name == "unified":
-        return UnifiedAgent
+        if not data:
+            return UnifiedAgent
+        from .data import DataPackage
+
+        package = DataPackage(data)
+        package.lookup("")  # Build the shared read-only index before parallel cases.
+        return lambda: UnifiedAgent(package=package)
     package = None
     if data:
         from .data import DataPackage

@@ -118,3 +118,14 @@ What the agent should ask next:
 - The unified agent produces valid, buyer-efficient packages and never accepts above the buyer reservation value.
 - Generated messages cite only available supplier evidence and make a concrete, reciprocal ask when a profile supports one.
 - Controlled practice results include at least two non-zero scores and documented replays.
+
+## Replay-derived negotiation rules
+
+The P02/P03/P10 hosted replays exposed gaps in the original policy wording.
+These rules apply to `unified` without changing Jonas's supplier-profile contract:
+
+- An `unknown` supplier priority forbids an invented supplier motive; it does **not** freeze a term that violates a buyer must-have. Repair such terms using permitted case options before offering packages.
+- Buyer coverage is separate from supplier preference. A larger annual volume or longer contract may be proposed up to the buyer's stated need and horizon when the published total-cost model shows that it lowers buyer cost. This is a proposal, not a claim that the supplier has agreed.
+- After a supplier response, anchor prices to our last sent sheets. A supplier concession must not make our next price asks more aggressive. Avoid resending an identical package.
+- Treat an explicit invitation to change a negotiable term as actionable even if the supplier has not moved its standing sheet. If the invitation lacks values, ask once for a concrete matching price/term sheet before an accept-or-walk decision.
+- An offer merely beating the alternative is not enough to predict a positive score. Review hosted replay outcomes against `C_open`, especially unchanged offers, and keep P02/P03/P10 as regression scenarios before promoting `unified`.

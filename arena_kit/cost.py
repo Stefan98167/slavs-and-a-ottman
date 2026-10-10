@@ -196,6 +196,16 @@ def snap(case, field, value):
     return options[0]
 
 
+def with_supplier_options(case, standard):
+    """The Arena allows listed options OR the supplier's explicit standard value."""
+    options = {field: list(values) for field, values in case.get("term_options", {}).items()}
+    for field in case.get("negotiable", []):
+        if field != "unit_price" and field in standard and options.get(field):
+            if standard[field] not in options[field]:
+                options[field].append(standard[field])
+    return {**case, "term_options": options}
+
+
 def complete_offer(case, terms):
     """A valid term sheet: exactly the negotiable fields, gaps from the buyer's plan, snapped."""
     plan = closing_terms(case, {"unit_price": None})
@@ -204,7 +214,8 @@ def complete_offer(case, terms):
     out = {}
     for field in case["negotiable"]:
         value = terms.get(field, plan.get(field))
-        if value is None and case.get("term_options", {}).get(field):
+        options = case.get("term_options", {}).get(field)
+        if value is None and options and None not in options:
             value = case["term_options"][field][0]
         value = snap(case, field, value)
         out[field] = round(value, 2) if field == "unit_price" and value is not None else value

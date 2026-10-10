@@ -77,6 +77,14 @@ class DataPackage:
         """The fact behind a citable ID (from facts.json, else its table row), or None."""
         return self.facts.get(ref) or self._ids.get(ref)
 
+    def record(self, ref):
+        """A fact together with its source metadata (author, scope, path and date).
+
+        Keep ``lookup`` unchanged: metadata must not replace the Arena's checked
+        values. This accessor is for selecting documents, not making assertions.
+        """
+        return {**(self.facts.get(ref) or {}), **(self._ids.get(ref) or {})}
+
     def ids(self, prefix):
         """All citable IDs starting with `prefix`, sorted, e.g. ids("idx:GP19-245113@")."""
         return sorted(i for i in self.facts.keys() | self._ids.keys() if i.startswith(prefix))

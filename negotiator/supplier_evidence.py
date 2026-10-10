@@ -8,7 +8,6 @@ from typing import Any
 
 from .intelligence import EvidenceInputError, contexts_from_records
 
-
 _OFFER_ID = re.compile(r"\boffer:[\w.-]+\b", re.IGNORECASE)
 _PART_ID = re.compile(r"\bpart:[\w.-]+\b", re.IGNORECASE)
 _INDEX_COST_CLAIM = re.compile(
@@ -123,10 +122,15 @@ def supplier_message_records(message: Mapping[str, Any], supplier_id: str) -> li
 
 
 def build_thread_supplier_context(
-    events: list[Mapping[str, Any]], supplier_id: str, part_id: str | None = None
+    events: list[Mapping[str, Any]], supplier_id: str, part_id: str | None = None,
+    *, supplemental_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Combine all supplier evidence in a thread, preserving the source of every fact."""
-    records: list[dict[str, Any]] = []
+    # Supplemental records have independently verified scope. Do not let the
+    # live-upload identity binding relabel evidence from a different supplier.
+    records = [record for record in supplemental_records or []
+               if record.get("Information", {}).get("supplier_id") == supplier_id
+               and record.get("Information", {}).get("part_id") in (None, part_id)]
     for event in events:
         if event.get("from") in {"buyer", "arena"}:
             continue
@@ -169,6 +173,11 @@ def _attachment_records(attachment: Mapping[str, Any], supplier_id: str) -> list
     text = attachment.get("text")
     if name.lower().endswith(".pdf") and isinstance(text, str):
         output.append(quote_pdf_record(text, source, supplier_id))
+    elif isinstance(text, str) and text.strip() and not records:
+        # XLSX/plain-text attachments are already rendered by the runner. Treat
+        # their text as attributed statements, not as guessed quote numbers.
+        output.append(_record({"kind": "document", "supplier_id": supplier_id,
+                               "document_text": text[:20000]}, source, 3))
     # Preserve a precomputed context from external callers when no raw rows are attached.
     if not output:
         bundle = attachment.get("supplier_context") or {}

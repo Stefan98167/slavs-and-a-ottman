@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+import operator
 from collections.abc import Mapping
 from typing import Any
 
-from arena_kit.cost import closing_terms, snap
+from arena_kit.cost import closing_terms, snap, total_cost, with_supplier_options
 
 from .packages import PackageInputError
 
@@ -27,15 +28,17 @@ def plan_packages(
     The default ladder asks for 5%, 3%, and 1% below the opening price. A
     supplier explicitly profiled as price-rigid receives a softer 2%, 1%, and
     0% ladder. A likely cash- or capacity-sensitive supplier gets a real
-    give-get: the less aggressive prices are paired with earlier payment or a
-    longer available commitment.
+    give-get: the lowest price is paired with earlier payment or a longer
+    commitment; higher prices retain the baseline terms. Never give the
+    supplier both a higher price and an extra concession for nothing in return.
 
     ``supplier_profile`` is Jonas's structured contract, not raw evidence.
     The policy reads only a dimension's ``state`` and treats every missing,
     malformed, or non-``likely`` value as unknown. An unknown profile keeps a
-    conservative price-only ladder by pinning every non-price negotiable term
-    to the supplier's current quote, standard terms, or conservative case
-    completion. It never interprets profile evidence itself.
+    conservative price-only ladder by pinning non-price negotiable terms to
+    the supplier's quote, except where a buyer must-have requires repair or a
+    buyer-approved volume/duration closes a cheaper coverage gap. These buyer
+    requirements do not imply anything about the supplier's motivation.
 
     ``claimed_cost_impact_pct`` is a supplier-stated index movement multiplied
     by its stated cost share. It adjusts only the opening discount, within a
@@ -48,6 +51,7 @@ def plan_packages(
         raise PackageInputError("supplier_standard_terms must be a mapping or None")
     if supplier_profile is not None and not isinstance(supplier_profile, Mapping):
         raise PackageInputError("supplier_profile must be a mapping or None")
+    case = with_supplier_options(case, supplier_standard_terms or {})
     opening = supplier_offer_terms.get("unit_price")
     if not _positive_number(opening):
         raise PackageInputError("supplier_offer_terms must contain a finite positive unit_price")
@@ -68,9 +72,9 @@ def plan_packages(
         for discount in discounts
     ]
     prices = _unique_round_money([price for price, _ in price_discounts])
-    # Start from the supplied commercial terms. This is deliberately separate
-    # from the supplier profile: an absent/unknown profile is not permission to
-    # optimise payment, volume, or duration in the buyer's favour.
+    # Start from supplied commercial terms. A missing supplier profile is not
+    # permission to invent payment or delivery preferences. Buyer must-haves
+    # and uncovered demand are separate, explicit reasons to amend terms.
     try:
         baseline_terms = closing_terms(
             dict(case), dict(supplier_offer_terms), dict(supplier_standard_terms or {})
@@ -80,12 +84,17 @@ def plan_packages(
             for field in case.get("negotiable", [])
             if field != "unit_price"
         }
+        quoted_terms = dict(conservative_terms)
     except (KeyError, TypeError, ValueError) as exc:
         raise PackageInputError(f"could not establish conservative package terms: {exc}") from exc
     constraints: dict[float, dict[str, Any]] = {
         price: dict(conservative_terms) for price in prices
     }
-    rationales: dict[float, list[str]] = {price: [] for price in prices}
+    rationales: dict[float, list[str]] = {
+        price: _buyer_required_terms(case, constraints[price], price, supplier_standard_terms or {})
+        for price in prices
+    }
+    buyer_term_reasons = list(dict.fromkeys(reason for reasons in rationales.values() for reason in reasons))
 
     supplier_friendly: dict[str, Any] = {}
     negotiable_fields = set(case.get("negotiable", []))
@@ -100,16 +109,32 @@ def plan_packages(
             if field not in negotiable_fields:
                 continue
             value = _capacity_commitment_option(case, field)
-            if value is not None and value > conservative_terms.get(field, value):
+            if value is not None and value > quoted_terms.get(field, value):
                 supplier_friendly[field] = value
 
-    if supplier_friendly:
-        for price in prices[1:]:
+    if supplier_friendly and len(prices) > 1:
+        for price in prices[:1]:
             constraints[price].update(supplier_friendly)
             if "payment_days" in supplier_friendly:
-                rationales[price].append("earlier payment in return for a less aggressive price")
+                rationales[price].append("earlier payment in return for the lower package price")
             if any(field in supplier_friendly for field in ("contract_months", "volume_per_year")):
-                rationales[price].append("greater commitment in return for a less aggressive price")
+                rationales[price].append("greater commitment in return for the lower package price")
+    elif len(prices) == 1:
+        supplier_friendly = {}  # Keep the baseline when rounding leaves no reciprocal price choice.
+
+    quality_terms = {}
+    if _profile_present(profile, "quality_sensitive") and "ppm_commitment" in negotiable_fields:
+        supported = profile["quality_sensitive"].get("supported_terms") or {}
+        ceiling = supported.get("ppm_commitment") if isinstance(supported, Mapping) else None
+        current = quoted_terms.get("ppm_commitment")
+        if _nonnegative_number(ceiling) and _nonnegative_number(current):
+            options = [value for value in case.get("term_options", {}).get("ppm_commitment", [])
+                       if _nonnegative_number(value) and ceiling <= value < current]
+            if options:
+                quality_terms["ppm_commitment"] = min(options)
+                for price in prices[1:]:
+                    constraints[price].update(quality_terms)
+                    rationales[price].append("a supported quality guarantee for a less aggressive price ask")
 
     discounts_by_price = dict(price_discounts)
     for price in prices:
@@ -125,10 +150,19 @@ def plan_packages(
         if profile_used[field]
     }
     trade_hypotheses = _trade_hypotheses(profile, supplier_friendly)
+    if quality_terms:
+        trade_hypotheses.append({
+            "profile_dimension": "quality_sensitive",
+            "buyer_gives": {},
+            "supplier_gives": quality_terms,
+            "supplier_gets": "a less aggressive price ask",
+            "rationale": "the supplier's explicit quality guarantee in return for a higher package price",
+            "evidence": _profile_evidence(profile, "quality_sensitive"),
+        })
     applied_dimensions = {item["profile_dimension"] for item in trade_hypotheses}
     if profile_used["price_rigid"]:
         applied_dimensions.add("price_rigid")
-    return {
+    plan = {
         "candidate_unit_prices": prices,
         "term_constraints_by_price": constraints,
         "rationales_by_price": rationales,
@@ -139,7 +173,103 @@ def plan_packages(
         ],
         "claim_adjustment_pct": claim_adjustment,
         "trade_hypotheses": trade_hypotheses,
+        "buyer_term_reasons": buyer_term_reasons,
     }
+    recheck_buyer_terms(case, plan, supplier_offer_terms, supplier_standard_terms or {})
+    return plan
+
+
+def recheck_buyer_terms(case, plan, offered, standard):
+    """Re-evaluate coverage after repricing or changing payment/quality terms.
+
+    Explicit supplier-profile commitments remain proposals backed by that
+    profile. Pure buyer-coverage changes must save money at the actual price,
+    not the earlier price from which a ladder happened to be constructed.
+    """
+    case = with_supplier_options(case, standard)
+    quoted = closing_terms(case, dict(offered), standard)
+    supported = {field for trade in plan["trade_hypotheses"]
+                 if trade["profile_dimension"] == "capacity_sensitive" for field in trade["buyer_gives"]}
+    reasons = []
+    for price, terms in plan["term_constraints_by_price"].items():
+        for field in ("contract_months", "volume_per_year"):
+            if field in terms and field not in supported:
+                terms[field] = snap(case, field, quoted.get(field))
+        reasons.extend(_buyer_required_terms(case, terms, price, standard))
+    plan["buyer_term_reasons"] = list(dict.fromkeys(reasons))
+
+
+_MUST_HAVE_OPS = {
+    "<=": operator.le, "<": operator.lt, ">=": operator.ge,
+    ">": operator.gt, "==": operator.eq, "!=": operator.ne,
+}
+
+
+def _buyer_required_terms(case, terms, opening_price, standard):
+    """Repair explicit buyer constraints, then close cost-saving coverage gaps.
+
+    This does not assert a supplier preference or that a proposed commitment
+    has already been accepted by the supplier.
+    """
+    buyer = case.get("buyer", {})
+    reasons = []
+    negotiable = set(case.get("negotiable", []))
+    must_haves = buyer.get("must_haves", [])
+    for field in dict.fromkeys(
+        requirement.get("field") for requirement in must_haves
+        if isinstance(requirement, Mapping)
+    ):
+        if field not in negotiable or field == "unit_price":
+            continue
+        requirements = [item for item in must_haves if item.get("field") == field]
+        current = terms.get(field)
+        if _meets_requirements(current, requirements):
+            continue
+        options = case.get("term_options", {}).get(field) or []
+        valid = [value for value in options if _meets_requirements(value, requirements)]
+        if not valid:
+            continue  # The generator will correctly reject an unrepairable sheet.
+        terms[field] = min(valid, key=lambda value: _distance(value, current))
+        reasons.append(f"{field.replace('_', ' ')} adjusted to meet the buyer must-have")
+
+    for field, ceiling in (
+        ("volume_per_year", buyer.get("need_per_year")),
+        ("contract_months", 12 * buyer["horizon_years"] if _positive_number(buyer.get("horizon_years")) else None),
+    ):
+        current = terms.get(field)
+        options = case.get("term_options", {}).get(field) or []
+        if field not in negotiable or not _positive_number(ceiling) or not _positive_number(current):
+            continue
+        available = [value for value in options if _positive_number(value) and current < value <= ceiling]
+        if not available:
+            continue
+        candidate = max(available)
+        before = total_cost(case, {**terms, "unit_price": opening_price}, standard)
+        proposed = {**terms, field: candidate, "unit_price": opening_price}
+        after = total_cost(case, proposed, standard)
+        if math.isfinite(before) and math.isfinite(after) and after < before - 0.01:
+            terms[field] = candidate
+            reasons.append(f"{field.replace('_', ' ')} covers more of the buyer's stated need")
+    return reasons
+
+
+def _meets_requirements(value, requirements):
+    for item in requirements:
+        compare = _MUST_HAVE_OPS.get(item.get("op"))
+        if compare is None or (value is None and item.get("op") not in ("==", "!=")):
+            return False
+        try:
+            if not compare(value, item.get("value")):
+                return False
+        except TypeError:
+            return False
+    return True
+
+
+def _distance(value, current):
+    if isinstance(value, (int, float)) and isinstance(current, (int, float)):
+        return (abs(value - current), value)
+    return (value != current, str(value))
 
 
 def _discounts(max_discount_pct: float, price_rigid: bool) -> list[float]:
@@ -187,18 +317,19 @@ def _profile_evidence(profile: Mapping[str, Any], field: str) -> list[dict[str, 
 def _trade_hypotheses(profile: Mapping[str, Any], supplier_friendly: Mapping[str, Any]) -> list[dict[str, Any]]:
     hypotheses = []
     mappings = {
-        "cash_sensitive": ("payment_days", "earlier payment", "less aggressive price"),
-        "capacity_sensitive": ("contract_months/volume_per_year", "greater commitment", "less aggressive price"),
+        "cash_sensitive": ("payment_days", "earlier payment"),
+        "capacity_sensitive": ("contract_months/volume_per_year", "greater commitment"),
     }
-    for dimension, (give, get, price_side) in mappings.items():
+    for dimension, (give, get) in mappings.items():
         relevant = [field for field in give.split("/") if field in supplier_friendly]
         if not relevant or not _profile_present(profile, dimension):
             continue
         hypotheses.append({
             "profile_dimension": dimension,
             "buyer_gives": {field: supplier_friendly[field] for field in relevant},
-            "supplier_gets": price_side,
-            "rationale": f"{get} in return for a less aggressive price",
+            "supplier_gets": get,
+            "buyer_gets": "the lower package price",
+            "rationale": f"{get} in return for the lower package price",
             "evidence": _profile_evidence(profile, dimension),
         })
     return hypotheses

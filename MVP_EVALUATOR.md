@@ -17,6 +17,13 @@ evaluation = evaluate_deal(
 
 `case` is an Arena case dictionary. `proposed_terms` may omit negotiable fields; the evaluator completes them using `arena_kit.cost.complete_offer`. Explicit unknown fields, invalid option values, or a non-positive/non-finite unit price leave a result available for inspection but mark it invalid for negotiation. `supplier_standard_terms` are the supplier's quoted fallbacks for omitted terms. `supplier_economics`, when supplied, requires finite `interest_rate` and `full_cost`; optional keys are `usual_rate`, `ppm`, and `extra`.
 
+Omitted negotiable fields take the supplied supplier standard before buyer defaults.
+The Arena permits the supplier's explicit standard value as well as the case's listed
+options. The evaluator and package policy preserve such values instead of snapping
+them to a different term. An explicitly allowed `null` index clause also stays `null`.
+Unified refuses acceptance when a negotiable field is missing from both the standing
+sheet and the supplier standard; buyer defaults alone cannot establish a supplier's promise.
+
 The JSON-serializable result is shaped as follows:
 
 ```json

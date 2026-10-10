@@ -10,22 +10,50 @@ DIMENSIONS = ('cash_sensitive', 'capacity_sensitive', 'quality_sensitive', 'pric
 RULES = {
     'cash_sensitive': (
         'explicit_payment_request', 0.8,
-        r'\b(?:we (?:need|require|request)|please (?:pay|provide))\b.{0,65}\b(?:earlier payment|advance payment|payment in advance|prepayment)\b|\b(?:earlier payment|advance payment|prepayment)\b.{0,60}\b(?:would allow us|will allow us|in exchange|discount)\b',
+        r'\b(?:we (?:need|require|request)|please (?:pay|provide))\b.{0,65}'
+        r'\b(?:earlier payment|advance payment|payment in advance|prepayment)\b|'
+        r'\b(?:earlier payment|advance payment|prepayment)\b.{0,60}'
+        r'\b(?:would allow us|will allow us|in exchange|discount)\b',
         r'\b(?:we do not (?:need|require)|no need for)\b.{0,40}\b(?:earlier payment|advance payment|prepayment)\b'),
     'capacity_sensitive': (
         'explicit_capacity_constraint', 0.85,
-        r'\b(?:our|we have)\b.{0,30}\b(?:limited capacity|capacity (?:is limited|is constrained|is fully booked)|production (?:is fully booked|capacity is limited))\b|\bwe (?:need|require)\b.{0,45}\b(?:forecast|commitment)\b.{0,45}\b(?:reserve|secure) capacity\b',
+        r'\b(?:our|we have)\b.{0,30}\b(?:limited capacity|capacity (?:is limited|is constrained|is fully booked)|'
+        r'production (?:is fully booked|capacity is limited))\b|\bwe (?:need|require)\b.{0,45}'
+        r'\b(?:forecast|commitment)\b.{0,45}\b(?:reserve|secure) capacity\b',
         r'\b(?:our capacity is not (?:limited|constrained)|we have no capacity (?:constraints|limits))\b'),
     'quality_sensitive': (
         'explicit_quality_commitment', 0.8,
-        r'\bwe (?:commit to|guarantee)\b.{0,60}\b(?:quality|ppm|defect rate|defects)\b|\bwe (?:are concerned about|cannot accept)\b.{0,50}\b(?:quality risk|quality deterioration|defect risk)\b',
+        r'\bwe (?:commit to|guarantee)\b.{0,60}\b(?:quality|ppm|defect rate|defects)\b|'
+        r'\bwe (?:are concerned about|cannot accept)\b.{0,50}\b(?:quality risk|quality deterioration|defect risk)\b',
         r'\bwe (?:cannot|do not) (?:commit to|guarantee)\b.{0,60}\b(?:quality|ppm|defect rate|defects)\b'),
     'price_rigid': (
         'explicit_fixed_price', 0.85,
-        r'\b(?:our|this) price is (?:fixed|non-negotiable)\b|\bwe (?:cannot|will not) (?:reduce|lower) (?:our |the )?price (?:any )?further\b',
-        r'\b(?:our|this) price is (?:not fixed|negotiable)\b|\bwe (?:can|are willing to) (?:reduce|lower) (?:our |the )?price further\b'),
+        r'\b(?:our|this) price is (?:fixed|non-negotiable)\b|'
+        r'\bwe (?:cannot|will not) (?:reduce|lower) (?:our |the )?price (?:any )?further\b',
+        r'\b(?:our|this) price is (?:not fixed|negotiable)\b|'
+        r'\bwe (?:can|are willing to) (?:reduce|lower) (?:our |the )?price further\b'),
 }
-TEXT_FIELDS = {'claim text', 'document text', 'message text', 'statement', 'text', 'notes', 'note', 'comment', 'comments', 'description'}
+TEXT_FIELDS = {'claim text', 'document text', 'message text', 'statement', 'text', 'notes',
+               'note', 'comment', 'comments', 'description'}
+
+# These are explicit supplier requests/statements, not economic inference.
+PAYMENT_REQUEST = r'\b(?:could|can|would) you pay our invoices within \d+ days\b'
+ADDITIONAL_RULES = {
+    'cash_sensitive': (
+        PAYMENT_REQUEST,
+        r'\b(?:faster|earlier) payment helps our cash flow\b',
+    ),
+    'capacity_sensitive': (
+        r'\bwe can confirm (?:additional |new )?volumes only against a binding .{0,25}commitment\b',
+        r'\bwe will prioriti[sz]e customers with firm.{0,25}commitments\b',
+        r'\b(?:our )?production is fully booked\b',
+        r'\bhigh capacity utili[sz]ation\b.{0,90}\bwe cannot confirm\b',
+    ),
+    'price_rigid': (
+        r'\bour price list applies to all customers without exception\b',
+        r'\bhead office has frozen all price reductions\b',
+    ),
+}
 
 
 def build_supplier_profile(evidence):
@@ -46,7 +74,10 @@ def build_supplier_profile(evidence):
                         conflict = True
                         continue
                     # Reject hypotheticals, reported buyer wishes, and ambiguous negation.
-                    if re.search(r'\b(?:if|might|could|buyer|customer|never)\b', statement, re.I):
+                    payment_request = dimension == 'cash_sensitive' and re.search(PAYMENT_REQUEST, statement, re.I)
+                    if re.search(r'\b(?:if|might|buyer|customer|never)\b', statement, re.I):
+                        continue
+                    if re.search(r'\bcould\b', statement, re.I) and not payment_request:
                         continue
                     if dimension != 'price_rigid' and re.search(r'\bnot\b', statement, re.I):
                         continue
@@ -55,7 +86,10 @@ def build_supplier_profile(evidence):
                     ):
                         refusals.append({'evidence_id': item['id'], 'source': item['source'],
                                          'excerpt': statement.strip(), 'rule': 'repeated_price_refusal'})
-                    if re.search(positive, statement, re.I):
+                    supported = re.search(positive, statement, re.I) or any(
+                        re.search(pattern, statement, re.I) for pattern in ADDITIONAL_RULES.get(dimension, ())
+                    )
+                    if supported:
                         identity = (str(item['id']), statement.strip().casefold())
                         if identity not in seen:
                             seen.add(identity)
@@ -66,4 +100,12 @@ def build_supplier_profile(evidence):
             confidence = 0.8
         if support and not conflict:
             result[dimension] = {'state': 'likely', 'confidence': confidence, 'evidence': support}
+            if dimension == 'quality_sensitive':
+                # A ceiling the supplier actually guaranteed. Policy may propose
+                # this or a weaker allowed ceiling, never invent a better one.
+                ceilings = [int(match.group(1)) for item in support
+                            if re.search(r'\bwe (?:commit to|guarantee)\b', item['excerpt'], re.I)
+                            for match in re.finditer(r'(?<![\d.,])\b(\d+)\s*ppm\b', item['excerpt'], re.I)]
+                if ceilings:
+                    result[dimension]['supported_terms'] = {'ppm_commitment': max(ceilings)}
     return result
