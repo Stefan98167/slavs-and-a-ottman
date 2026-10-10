@@ -44,7 +44,10 @@ The result shape is:
 
 Each context contains matching evidence, quote history with `fact_sources`, explicit
 supplier claims, supplier profile dimensions, and evidence gaps. Original headers and
-source line references remain available in `records` and the context evidence.
+source line references remain available in `records` and the context evidence. Quote
+history only identifies a latest quote when its supplier-provided `quote_date` exists;
+it leaves that value unknown when dates are absent. Aggregate min/max prices are only
+reported when every quote has one explicitly shared currency and price unit.
 
 ## Use from the command line
 
@@ -66,8 +69,12 @@ Quote history is descriptive. It does not establish cash pressure, capacity pres
 price rigidity, quality sensitivity, or buyer targets. Profile dimensions therefore
 remain `unknown`. The `SupplierContextAgent` uses the available evidence directly:
 it carries explicit supplier-stated commercial terms into counters, considers a
-same-context historical quote when setting its price target, responds to the supplier's
-latest concession, and cites the highest-priority supplier evidence in its message.
+historical quote only when currency, price unit, and all available volume and commercial
+terms match, responds to the supplier's latest concession, and cites the highest-priority
+supplier evidence in its message. Supplier-stated index movement times cost share can
+adjust the initial discount by up to the policy's configured `max_claim_adjustment_pct`
+(2 percentage points by default). This is a bounded use of an unverified supplier claim,
+not an independent cost estimate.
 Those steps use observed supplier facts; they do not claim to infer the supplier's
 motives or the buyer's willingness to pay.
 

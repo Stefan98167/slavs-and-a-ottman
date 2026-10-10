@@ -1,0 +1,38 @@
+{
+  "trace_id": "supplier-claim-and-concession-v1",
+  "supplier_id": "sup:trace-01",
+  "opening": {
+    "from": "supplier",
+    "status": "open",
+    "message_id": "msg:trace-01-0",
+    "body": "AS-14404 rose 5.9 % in twelve months and is 45 % of our cost.",
+    "term_sheets": [
+      {
+        "term_sheet_id": "offer:trace-01-0",
+        "terms": {
+          "unit_price": 100.0,
+          "currency": "EUR",
+          "price_unit": "each",
+          "part_id": "part:trace-01"
+        }
+      }
+    ]
+  },
+  "counter_response": {
+    "from": "supplier",
+    "status": "final_offer",
+    "message_id": "msg:trace-01-1",
+    "body": "We can offer 98 EUR per unit.",
+    "term_sheets": [
+      {
+        "term_sheet_id": "offer:trace-01-1",
+        "terms": {
+          "unit_price": 98.0,
+          "currency": "EUR",
+          "price_unit": "each",
+          "part_id": "part:trace-01"
+        }
+      }
+    ]
+  }
+}

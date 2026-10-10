@@ -57,12 +57,11 @@ def test_filter_and_context_are_traceable_and_do_not_infer_profile_traits():
     assert context["quote_history"]["count"] == 2
     assert context["quote_history"]["latest_quote_date"] == "2025-02-01"
     assert context["quote_history"]["latest_unit_price"] == 130
-    assert context["quote_history"]["min_unit_price"] == 130
-    assert context["quote_history"]["max_unit_price"] == 142.5
+    assert context["quote_history"]["min_unit_price"] is None
+    assert context["quote_history"]["max_unit_price"] is None
+    assert context["quote_history"]["comparable_price_basis"] is None
     assert context["quote_history"]["awarded_quote_count"] == 1
-    assert context["quote_history"]["fact_sources"]["min_unit_price"] == [
-        {"evidence_id": "quote:7100004", "source": "data/data/quotes.csv:5"}
-    ]
+    assert context["quote_history"]["fact_sources"]["min_unit_price"] == []
     assert all(
         profile["state"] == "unknown" and profile["confidence"] == 0.0
         for profile in context["supplier_profile"].values()

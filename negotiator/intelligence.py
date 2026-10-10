@@ -37,6 +37,7 @@ _CANONICAL_FIELD_ALIASES = {
     },
     "quote_date": {"quote_date", "quote date", "date", "offer date"},
     "currency": {"currency", "currency code", "währung", "waehrung"},
+    "price_unit": {"price unit", "unit of measure", "uom", "pricing unit"},
     "payment_days": {
         "payment_days", "payment days", "payment terms", "payment terms days net",
         "days net", "net payment days", "zahlungsziel",
@@ -296,11 +297,24 @@ def _canonicalize_information(information: Mapping[str, Any]) -> dict[str, Any]:
             if original_key is not None:
                 result[canonical] = _canonical_value(canonical, information[original_key])
                 break
+    if "unit_price" in result and "price_unit" not in result:
+        # Arena offer sheets define unit_price per ordered item. Explicit CSV UOMs win.
+        unit_price_header = next(
+            (str(key) for key in information if _header_key(str(key)) in {
+                _header_key(alias) for alias in _CANONICAL_FIELD_ALIASES["unit_price"]
+            }),
+            "",
+        )
+        result["price_unit"] = _unit_from_price_header(unit_price_header)
     return result
 
 
 def _canonical_value(field: str, value: Any) -> Any:
     """Parse unambiguous European decimal-comma values for recognized numeric fields."""
+    if field == "price_unit" and isinstance(value, str):
+        unit = value.strip().casefold()
+        if unit in {"pc", "pcs", "piece", "pieces", "unit", "units", "each"}:
+            return "each"
     numeric_fields = {
         "unit_price", "payment_days", "lead_time_days", "contract_months", "volume_per_year",
         "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint", "index_change_pct",
@@ -311,6 +325,19 @@ def _canonical_value(field: str, value: Any) -> Any:
         if re.fullmatch(r"[+-]?\d+,\d+", candidate):
             return float(candidate.replace(",", "."))
     return value
+
+
+def _unit_from_price_header(header: str) -> str | None:
+    parenthetical = re.search(r"\(([^)]*)\)", header)
+    unit_text = parenthetical.group(1).lower() if parenthetical else ""
+    match = re.search(r"(?:/|per\s+)(\d+\s*)?(pcs?|pieces?|units?|kg|g|tonnes?|tons?|m|lit(?:er|re)s?)\b", unit_text)
+    if match:
+        quantity, unit = match.groups()
+        unit = unit.rstrip("s")
+        if unit in {"pc", "piece", "unit"}:
+            unit = "each"
+        return f"{quantity.strip()} {unit}" if quantity else unit
+    return "each" if "unit price" in _header_key(header) else None
 
 
 def _header_key(value: str) -> str:
@@ -337,22 +364,42 @@ def _context_evidence(record: Mapping[str, Any]) -> dict[str, Any]:
 
 def _quote_history(quotes: list[Mapping[str, Any]]) -> dict[str, Any]:
     quote_refs = [_reference(quote) for quote in quotes]
-    latest_dated = _latest_by_date(quotes) or (quotes[-1] if quotes else None)
+    # Record order is not quote chronology: attachments can contain older history.
+    latest_dated = _latest_by_date(quotes)
     prices = [
         (float(quote["data"]["unit_price"]), quote)
         for quote in quotes
         if _finite_number(quote.get("data", {}).get("unit_price"))
     ]
     priced_quotes = [quote for _, quote in prices]
-    latest_price_quote = _latest_by_date(priced_quotes) or (priced_quotes[-1] if priced_quotes else None)
-    min_price = min(prices, key=lambda item: item[0], default=None)
-    max_price = max(prices, key=lambda item: item[0], default=None)
+    latest_price_quote = _latest_by_date(priced_quotes)
+    bases = {
+        (str(quote["data"].get("currency") or "").strip().upper(),
+         str(quote["data"].get("price_unit") or "").strip().casefold())
+        for quote in priced_quotes
+    }
+    one_known_basis = (
+        len(bases) == 1 and all(currency and unit for currency, unit in bases)
+    )
+    comparable_prices = prices if one_known_basis else []
+    min_price = min(comparable_prices, key=lambda item: item[0], default=None)
+    max_price = max(comparable_prices, key=lambda item: item[0], default=None)
     awarded = [quote for quote in quotes if quote.get("data", {}).get("awarded") is True]
 
     return {
         "count": len(quotes),
         "latest_quote_date": _data_value(latest_dated, "quote_date"),
         "latest_unit_price": _data_value(latest_price_quote, "unit_price"),
+        "latest_price_basis": (
+            {"currency": _data_value(latest_price_quote, "currency"),
+             "price_unit": _data_value(latest_price_quote, "price_unit")}
+            if latest_price_quote else None
+        ),
+        "latest_price_is_dated": latest_price_quote is not None,
+        "comparable_price_basis": (
+            {"currency": next(iter(bases))[0], "price_unit": next(iter(bases))[1]}
+            if one_known_basis else None
+        ),
         "min_unit_price": min_price[0] if min_price else None,
         "max_unit_price": max_price[0] if max_price else None,
         "awarded_quote_count": len(awarded),
@@ -363,6 +410,7 @@ def _quote_history(quotes: list[Mapping[str, Any]]) -> dict[str, Any]:
                 "quote_date": quote.get("data", {}).get("quote_date"),
                 "unit_price": quote.get("data", {}).get("unit_price"),
                 "currency": quote.get("data", {}).get("currency"),
+                "price_unit": quote.get("data", {}).get("price_unit"),
                 "terms": _quote_terms(quote.get("data", {})),
             }
             for quote in quotes
@@ -394,7 +442,7 @@ def _quote_terms(data: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(nested, Mapping) and nested:
         return dict(nested)
     term_fields = {
-        "unit_price", "currency", "payment_days", "lead_time_days", "volume_per_year",
+        "unit_price", "currency", "price_unit", "payment_days", "lead_time_days", "volume_per_year",
         "contract_months", "effective_date", "index_clause", "incoterm", "tooling_eur",
         "ppm_commitment", "chargeback_eur_per_complaint",
     }

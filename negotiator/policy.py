@@ -7,13 +7,13 @@ class SupplierOnlyPolicy:
     """Set quote targets and evidence use without reading buyer or case data.
 
     The first counter asks for a percentage reduction from the supplier's opening
-    quote. If same-part supplier quote history supports a lower price, the target
-    uses that supplier-stated price instead. Later counters respond to movement in
-    the supplier's current offer, rather than repeating the first counter forever.
+    quote. A supplier's claimed index movement and cost share can soften that ask,
+    within a configured bound. Comparable same-part quotes can cap the target.
+    Later counters respond to the supplier's concessions.
     """
 
     def __init__(self, counter_discount_pct=5, max_messages_per_supplier=6,
-                 concession_share_pct=50):
+                 concession_share_pct=50, max_claim_adjustment_pct=2):
         try:
             discount = Decimal(str(counter_discount_pct))
         except InvalidOperation as exc:
@@ -31,14 +31,23 @@ class SupplierOnlyPolicy:
         if not concession_share.is_finite() or not 0 <= concession_share <= 100:
             raise ValueError("concession_share_pct must be a number from 0 to 100")
         self.concession_share_pct = concession_share
+        try:
+            claim_adjustment = Decimal(str(max_claim_adjustment_pct))
+        except InvalidOperation as exc:
+            raise ValueError("max_claim_adjustment_pct must be a number from 0 to 100") from exc
+        if not claim_adjustment.is_finite() or not 0 <= claim_adjustment <= 100:
+            raise ValueError("max_claim_adjustment_pct must be a number from 0 to 100")
+        self.max_claim_adjustment_pct = claim_adjustment
 
     def target_price(self, opening_price, *, current_price=None, previous_supplier_price=None,
-                     previous_buyer_price=None, historical_low=None, rounds=0):
-        """Return a staged counter target, capped by a supplier-stated historical low.
+                     previous_buyer_price=None, historical_low=None, rounds=0,
+                     claimed_cost_impact_pct=0):
+        """Return a staged counter target, capped by a comparable historical quote.
 
         ``rounds`` counts prior buyer replies. On subsequent counters, the buyer
         shares the configured fraction of the supplier's latest price concession.
-        A same-scope historical low can lower the resulting target.
+        The signed, supplier-claimed cost impact softens or strengthens the opening
+        discount by no more than ``max_claim_adjustment_pct`` percentage points.
         """
         try:
             opening = Decimal(str(opening_price))
@@ -46,7 +55,18 @@ class SupplierOnlyPolicy:
             raise ValueError("supplier opening price must be numeric") from exc
         if not opening.is_finite() or opening <= 0:
             raise ValueError("supplier opening price must be finite and positive")
-        initial = (opening * (Decimal(1) - self.counter_discount_pct / Decimal(100))).quantize(
+        try:
+            claimed_impact = Decimal(str(claimed_cost_impact_pct))
+        except InvalidOperation as exc:
+            raise ValueError("claimed_cost_impact_pct must be numeric") from exc
+        if not claimed_impact.is_finite():
+            raise ValueError("claimed_cost_impact_pct must be finite")
+        adjustment = max(-self.max_claim_adjustment_pct,
+                         min(self.max_claim_adjustment_pct, claimed_impact))
+        # Supplier claims can soften or strengthen the opening counter, within a
+        # configurable bound. They are assertions, not independently verified facts.
+        discount = max(Decimal(0), self.counter_discount_pct - adjustment)
+        initial = (opening * (Decimal(1) - discount / Decimal(100))).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         target = initial

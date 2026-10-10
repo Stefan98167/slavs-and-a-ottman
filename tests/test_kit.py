@@ -134,7 +134,12 @@ def test_complete_offer_fills_and_snaps():
 def test_documents_read_and_parse():
     text = read_document("quote.pdf", (FIXTURES / "quote.pdf").read_bytes())
     terms = quote_terms(text)
-    assert terms["stated"] == {"unit_price": 43.2, "effective_date": "2027-01-01"}
+    assert terms["stated"] == {
+        "unit_price": 43.2,
+        "currency": "EUR",
+        "price_unit": "each",
+        "effective_date": "2027-01-01",
+    }
     assert terms["standard"] == {
         "payment_days": 30,
         "ppm_commitment": 900,

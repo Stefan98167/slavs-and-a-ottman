@@ -49,6 +49,9 @@ During Arena sessions the runner parses incoming supplier CSV attachments into
 supplier offer and explicit index/cost-share claims into one sourced context. The
 context retains quote terms and history, normalized claims, and source references to
 the originating attachment, CSV row, or supplier message.
+The PDF parser handles text PDFs directly. For scanned PDFs, install the optional
+`ocr` extra (`pip install -e '.[ocr]'`) and the Tesseract and Poppler system tools;
+the live runner records an explanatory `pdf_parse_error` if a scan cannot be read.
 
 ## Run the supplier-only agent
 
@@ -56,7 +59,10 @@ The Arena-compatible `SupplierContextAgent` ignores the case argument and uses o
 live supplier messages, offers, and parsed supplier attachments. It carries explicit
 commercial values from supplier evidence into counteroffers, uses same-context
 supplier quote history as a price anchor when comparable, and moves its counter by a
-configurable share of each supplier concession. It also cites the supplier's
+configurable share of each supplier concession. Supplier-claimed index movement and
+cost share can soften or strengthen the opening discount, bounded to 2 percentage
+points by default. This uses the supplier's assertion as a negotiation input; it does
+not verify that claim. It also cites the supplier's
 highest-priority evidence in its rationale. It accepts offers that meet its target;
 when a supplier makes a final offer or the agent runs out of moves, it accepts the
 best complete standing offer as a last resort rather than walking away and scoring

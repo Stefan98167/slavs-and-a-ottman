@@ -1,4 +1,12 @@
+import io
+import sys
+from types import SimpleNamespace
+
+import pytest
+
 from arena_kit.docs import quote_terms
+from arena_kit.docs import read_document
+from arena_kit.play import fetch_documents
 from negotiator.supplier_evidence import build_thread_supplier_context, quote_pdf_record
 
 
@@ -91,6 +99,50 @@ Index clause AS-14404, 45% material, deadband 0,5 %, base 2026-06
     }
 
 
+def test_pdf_parser_accepts_case_spacing_colons_and_explicit_price_basis():
+    terms = quote_terms("""offered terms:
+unit price (USD/100 pcs): 12,34
+payment terms (days net): 45
+""")
+
+    assert terms["stated"]["unit_price"] == 12.34
+    assert terms["stated"]["currency"] == "USD"
+    assert terms["stated"]["price_unit"] == "100 each"
+    assert terms["stated"]["payment_days"] == 45
+
+
+def test_scanned_pdf_uses_optional_ocr_fallback(monkeypatch):
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    pdf = io.BytesIO()
+    writer.write(pdf)
+    monkeypatch.setitem(sys.modules, "pytesseract", SimpleNamespace(image_to_string=lambda image: "OCR quote text"))
+    monkeypatch.setitem(sys.modules, "pdf2image", SimpleNamespace(convert_from_bytes=lambda data: ["page-image"]))
+
+    assert read_document("scanned.PDF", pdf.getvalue()) == "OCR quote text"
+
+
+def test_live_runner_keeps_going_and_explains_missing_ocr(monkeypatch):
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    pdf = io.BytesIO()
+    writer.write(pdf)
+    monkeypatch.setitem(sys.modules, "pytesseract", None)
+    monkeypatch.setitem(sys.modules, "pdf2image", None)
+    table = SimpleNamespace(attachment=lambda attachment_id: pdf.getvalue())
+    message = {"from": "supplier", "attachments": [
+        {"attachment_id": "att:scan", "name": "scan.pdf"}
+    ]}
+
+    parsed = fetch_documents(table, message, "sup:scan")
+    assert parsed["attachments"][0]["text"] == ""
+    assert "Tesseract/Poppler" in parsed["attachments"][0]["pdf_parse_error"]
+
+
 def test_supplier_message_combines_index_movement_and_cost_share_with_source():
     message = {
         "message_id": "msg:70710-0-0",
@@ -133,10 +185,12 @@ def test_thread_context_unifies_pdf_csv_quotes_claims_and_provenance():
 
     assert context["part_id"] == "part:370010"
     assert context["quote_history"]["count"] == 2
-    assert context["quote_history"]["latest_unit_price"] == 5.8
-    assert context["quote_history"]["fact_sources"]["min_unit_price"] == [
-        {"evidence_id": "supplier_attachment_history.csv:2", "source": "supplier_attachment_history.csv:2"}
-    ]
+    assert context["quote_history"]["latest_unit_price"] is None
+    assert context["quote_history"]["latest_quote_date"] is None
+    assert context["quote_history"]["latest_price_is_dated"] is False
+    assert context["quote_history"]["fact_sources"]["latest_unit_price"] == []
+    assert context["quote_history"]["fact_sources"]["min_unit_price"] == []
+    assert context["quote_history"]["comparable_price_basis"] is None
     assert context["evidence"]
     assert any(item["kind"] == "claim" for item in context["evidence"])
     assert any(item["source"].startswith("att:70710-0-quote") for item in context["evidence"])

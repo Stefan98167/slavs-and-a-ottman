@@ -43,6 +43,8 @@ def quote_pdf_record(text: str, source: str, supplier_id: str | None = None) -> 
         "terms": effective_terms,
         **effective_terms,
     }
+    if "unit_price" in effective_terms:
+        information.setdefault("price_unit", "each")
     if not effective_terms:
         information["document_text"] = text[:20000]
     return _record(information, source, priority=1 if effective_terms else 3)
@@ -108,6 +110,8 @@ def supplier_message_records(message: Mapping[str, Any], supplier_id: str) -> li
             "terms": dict(terms),
             **dict(terms),
         }
+        if "unit_price" in terms:
+            information.setdefault("price_unit", "each")
         if str(terms.get("currency") or "").strip():
             information["currency"] = terms["currency"]
         records.append(_record(information, source, priority=1))

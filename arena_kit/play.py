@@ -159,7 +159,15 @@ def fetch_documents(table, message, supplier_id=None):
         raw = None
         if att.get("attachment_id") and "text" not in att:
             raw = table.attachment(att["attachment_id"])
-            att["text"] = read_document(name, raw)
+            try:
+                att["text"] = read_document(name, raw)
+                att.pop("pdf_parse_error", None)
+            except ValueError as exc:
+                if str(name).lower().endswith(".pdf"):
+                    att["text"] = ""
+                    att["pdf_parse_error"] = str(exc)
+                else:
+                    raise
         needs_context = bool(supplier_id) and not att.get("supplier_context")
         if is_csv and ("csv_records" not in att or needs_context):
             try:

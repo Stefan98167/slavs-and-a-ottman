@@ -1,6 +1,6 @@
 """Arena-compatible agent driven by supplier offers and parsed supplier context only."""
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 from arena_kit.docs import standard_terms
@@ -118,27 +118,91 @@ def _evidence_terms(context):
     return terms
 
 
-def _history_floor(context, current_terms):
-    """Use a supplier's lowest comparable, same-context quote as an auditable anchor."""
+_COMPARABLE_TERM_FIELDS = (
+    "volume_per_year", "contract_months", "payment_days", "lead_time_days",
+    "incoterm", "index_clause", "tooling_eur",
+)
+
+
+def _history_floor(context, current_terms, current_offer_id=None):
+    """Use only same-part historical quotes with a known, matching price basis."""
     if not context:
         return None, None
-    current_currency = str(current_terms.get("currency") or "").strip().upper()
+    current = dict(current_terms or {})
+    current_offer = None
+    for item in context.get("evidence", []):
+        data = item.get("data") or {}
+        if item.get("kind") == "quote" and current_offer_id and data.get("offer_id") == current_offer_id:
+            current_offer = data
+            break
+    if current_offer:
+        current = {**current_offer, **(current_offer.get("terms") or {}), **current}
+    current_currency = _normalized_term(current.get("currency"))
+    current_unit = _normalized_term(current.get("price_unit"))
+    # A numeric historical quote is not comparable without a known currency and unit.
+    if not current_currency or not current_unit:
+        return None, None
     quotes = []
     for item in context.get("evidence", []):
         if not isinstance(item, dict) or item.get("kind") != "quote":
             continue
         data = item.get("data") or {}
+        if current_offer_id and data.get("offer_id") == current_offer_id:
+            continue
         price = _price(data.get("unit_price"))
-        currency = str(data.get("currency") or "").strip().upper()
+        currency = _normalized_term(data.get("currency"))
+        unit = _normalized_term(data.get("price_unit"))
         if price is None:
             continue
-        if current_currency and currency != current_currency:
+        if currency != current_currency or unit != current_unit:
+            continue
+        terms = {**(data.get("terms") or {}), **data}
+        if any(
+            (current.get(field) is None) != (terms.get(field) is None)
+            or (current.get(field) is not None and terms.get(field) is not None
+                and _normalized_term(current[field]) != _normalized_term(terms[field]))
+            for field in _COMPARABLE_TERM_FIELDS
+        ):
             continue
         quotes.append((price, item.get("source")))
     if not quotes:
         return None, None
     low, source = min(quotes, key=lambda pair: pair[0])
     return low, source
+
+
+def _normalized_term(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return Decimal(str(value)).normalize()
+    if isinstance(value, dict):
+        return tuple(sorted((key, _normalized_term(item)) for key, item in value.items()))
+    if isinstance(value, list):
+        return tuple(_normalized_term(item) for item in value)
+    return str(value).strip().casefold()
+
+
+def _supplier_cost_impact(context):
+    """Summarize the latest supplier-claimed index impact, before policy caps it."""
+    if not context:
+        return 0.0
+    latest_by_series = {}
+    for item in context.get("supplier_claims", []):
+        data = item.get("data") or {}
+        series = data.get("series")
+        change = data.get("index_change_pct")
+        share = data.get("cost_share_pct")
+        if not series or isinstance(change, bool) or isinstance(share, bool):
+            continue
+        try:
+            change, share = float(str(change).replace(",", ".")), float(str(share).replace(",", "."))
+        except (TypeError, ValueError):
+            continue
+        if not (-100 <= change <= 1000 and 0 <= share <= 100):
+            continue
+        latest_by_series[str(series).upper()] = change * share / 100
+    return sum(latest_by_series.values())
 
 
 def _argument_text(context):
@@ -194,7 +258,11 @@ class SupplierContextAgent:
             std = standard_terms(events)
             context = _supplier_context(events, supplier_id, terms.get("part_id"))
             evidence_terms = _evidence_terms(context)
-            required = set(terms) | set(evidence_terms)
+            # The live offer defines which fields the Arena accepts in a counter.
+            # Supplier attachments can contain fixed context (currency, volume,
+            # lead time, etc.); use those facts only to fill fields that the live
+            # thread says are negotiable or explicitly missing.
+            required = set(terms)
             for event in events:
                 if event.get("from") != "buyer":
                     required.update(event.get("missing_fields") or [])
@@ -203,7 +271,8 @@ class SupplierContextAgent:
             supplied = {**evidence_terms, **std, **terms}
             missing = sorted(field for field in required if field not in supplied)
             target = None
-            history_floor, history_source = _history_floor(context, terms)
+            history_floor, history_source = _history_floor(context, terms, offer_id)
+            claimed_cost_impact = _supplier_cost_impact(context)
             previous_price = _previous_supplier_price(events)
             previous_target = _previous_buyer_price(events)
             if opening_price is not None:
@@ -213,6 +282,7 @@ class SupplierContextAgent:
                         previous_supplier_price=previous_price,
                         previous_buyer_price=previous_target,
                         historical_low=history_floor, rounds=rounds,
+                        claimed_cost_impact_pct=claimed_cost_impact,
                     )
                 except ValueError:
                     pass
@@ -252,6 +322,14 @@ class SupplierContextAgent:
                 rationale = []
                 if argument:
                     rationale.append(f"We reviewed your priority information ({argument}).")
+                if claimed_cost_impact:
+                    shown_impact = Decimal(str(claimed_cost_impact)).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    rationale.append(
+                        "We considered your stated index movement and cost share "
+                        f"(approximately {shown_impact}% claimed cost impact)."
+                    )
                 if history_floor is not None:
                     rationale.append(
                         f"Your comparable quote history includes {history_floor}"
@@ -270,20 +348,22 @@ class SupplierContextAgent:
             candidates.append((current_price is None, supplier_id, offer_id, opening_price,
                                target, current_price, action, context, message,
                                history_floor, history_source, previous_price, previous_target,
-                               argument))
+                               argument, claimed_cost_impact))
 
         if candidates:
             # Work a priced quote before a thread that has not yet supplied a price;
             # never compare prices across different suppliers or parts.
             candidate = min(candidates, key=lambda item: item[0])
             (_, supplier_id, offer_id, opening, target, current, action, context, message,
-             history_floor, history_source, previous_price, previous_target, argument) = candidate
+             history_floor, history_source, previous_price, previous_target, argument,
+             claimed_cost_impact) = candidate
             self._record(supplier_id, offer_id, opening, target, current, action, context, message)
             self.decision_history[-1].update({
                 "previous_supplier_price": float(previous_price) if previous_price is not None else None,
                 "previous_buyer_target": float(previous_target) if previous_target is not None else None,
                 "supplier_history_low": float(history_floor) if history_floor is not None else None,
                 "supplier_history_source": history_source,
+                "supplier_claimed_cost_impact_pct": claimed_cost_impact,
                 "top_priority_argument": argument,
                 "supplier_evidence_terms": _evidence_terms(context),
             })
