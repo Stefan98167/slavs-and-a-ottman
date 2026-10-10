@@ -1,5 +1,7 @@
 """Open cases are refreshed and safely closed after agent or close-action failures."""
 
+import time
+
 import httpx
 
 from arena_kit.client import ArenaClient, ArenaError
@@ -97,10 +99,11 @@ def test_restart_resumes_and_closes_existing_final_session():
     opening = {"from": "supplier", "status": "agreed", "term_sheets": [
         {"term_sheet_id": "offer:1-1", "terms": {"unit_price": 10}},
     ], "attachments": []}
-    calls = []
+    calls, timeouts = [], []
 
     def handler(request):
         calls.append((request.method, request.url.path))
+        timeouts.append(request.extensions.get("timeout"))
         if request.method == "POST" and request.url.path.endswith("/sessions"):
             return httpx.Response(409, json={"detail": "one session per case in the final: sim-final"})
         if request.method == "GET" and request.url.path.endswith("/sessions/sim-final"):
@@ -120,9 +123,11 @@ def test_restart_resumes_and_closes_existing_final_session():
                 "action": {"type": "accept", "term_sheet_id": "offer:1-1"},
             }}
 
-    result = play(RemoteTable(client, case), case["case_id"], Buyer())
+    result = play(RemoteTable(client, case), case["case_id"], Buyer(), deadline=time.time() + 600)
     assert result == {"ended": True, "deal": True, "supplier_id": "sup:1"}
     assert calls.count(("POST", "/v1/sessions")) == 1
     assert calls.count(("POST", "/v1/sessions/sim-final/threads/sup:1/messages")) == 1
     assert ("GET", "/v1/sessions/sim-final") in calls
     assert ("GET", "/v1/sessions/sim-final/threads/sup:1") in calls
+    assert len(timeouts) == len(calls)
+    assert all(timeout and max(timeout.values()) < client.timeout for timeout in timeouts)

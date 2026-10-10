@@ -4,6 +4,8 @@ import os
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
 
@@ -48,21 +50,57 @@ class ArenaClient:
         headers = {"X-API-Key": key} if key else {}
         self.retries, self.rate, self._lock, self._next = retries, rate, threading.Lock(), 0.0
         self.practice_remaining = None  # from the last practice reply that said so
+        self.timeout = timeout
+        self._deadline = ContextVar(f"arena_deadline_{id(self)}", default=None)
         self.http = httpx.Client(base_url=f"{base_url}/v1", headers=headers, timeout=timeout, transport=transport)
+
+    @contextmanager
+    def request_deadline(self, deadline):
+        """Set a per-thread wall-clock deadline for calls made inside this scope."""
+        token = self._deadline.set(deadline)
+        try:
+            yield
+        finally:
+            self._deadline.reset(token)
+
+    def _remaining(self):
+        deadline = self._deadline.get()
+        if deadline is None:
+            return None
+        cap = deadline() if callable(deadline) else deadline
+        return cap - time.time()
 
     def _pace(self):
         with self._lock:
             now = time.monotonic()
             wait, self._next = self._next - now, max(now, self._next) + 1 / self.rate
         if wait > 0:
+            remaining = self._remaining()
+            if remaining is not None:
+                if remaining <= wait + 0.01:
+                    raise httpx.TimeoutException("wave deadline leaves no time for request pacing")
+                wait = min(wait, remaining - 0.01)
             time.sleep(wait)
+
+    def _request_timeout(self):
+        remaining = self._remaining()
+        if remaining is None:
+            return self.timeout
+        if remaining <= 0.05:
+            raise httpx.TimeoutException("wave deadline reached before HTTP request")
+        attempts_left = self.retries + 1
+        retry_budget = MAX_RETRY_AFTER_S * max(0, attempts_left - 1)
+        phase = min(self.timeout, max(0.01, remaining - retry_budget - 0.05) / (4 * attempts_left))
+        return httpx.Timeout(connect=phase, read=phase, write=phase, pool=phase)
 
     def _call(self, method, path, body=None, params=None, raw=False):
         headers = {MOVE_ID_HEADER: uuid.uuid4().hex} if method == "POST" else {}
         for attempt in range(self.retries + 1):
             self._pace()
             try:
-                r = self.http.request(method, path, json=body, params=params, headers=headers)
+                r = self.http.request(
+                    method, path, json=body, params=params, headers=headers, timeout=self._request_timeout()
+                )
             except httpx.TransportError:
                 if attempt == self.retries:
                     raise
@@ -72,7 +110,13 @@ class ArenaClient:
                 short = wait.isdigit() and int(wait) <= MAX_RETRY_AFTER_S
                 if r.status_code not in RETRY_STATUS or attempt == self.retries or (r.status_code == 429 and not short):
                     break
-            time.sleep(float(wait) if wait and wait.isdigit() else 0.5 * 2**attempt)
+            delay = float(wait) if wait and wait.isdigit() else 0.5 * 2**attempt
+            remaining = self._remaining()
+            if remaining is not None:
+                if remaining <= delay + 0.01:
+                    raise httpx.TimeoutException("retry delay would exceed wave deadline")
+                delay = min(delay, remaining - 0.01)
+            time.sleep(delay)
         if (left := r.headers.get(REMAINING_HEADER, "")).isdigit():
             self.practice_remaining = int(left)
         if r.status_code >= 400:

@@ -40,10 +40,21 @@ class RemoteTable:
 
     def __init__(self, client, case=None):
         self.client, self.session_id, self.case, self.done = client, None, case, None
+        self.deadline = None
+
+    def set_deadline(self, deadline):
+        self.deadline = deadline
+
+    def _client_call(self, method, *args):
+        scope = getattr(self.client, "request_deadline", None)
+        if callable(scope) and self.deadline is not None:
+            with scope(self.deadline):
+                return method(*args)
+        return method(*args)
 
     def open(self, case_id):
         try:
-            r = self.client.open_session(case_id)
+            r = self._client_call(self.client.open_session, case_id)
         except ArenaError as e:
             running = RUNNING.search(str(e.detail)) if e.status == 409 else None
             if not (running and self.case):
@@ -58,20 +69,22 @@ class RemoteTable:
         so far, from the arena."""
         self.session_id = session_id
         log.info("resuming session %s", session_id)
-        state = self.client.session(session_id)
+        state = self._client_call(self.client.session, session_id)
         if state["status"] == "ended":
             self.done = self.result()
-        return self.case, {s: self.client.thread(session_id, s)["messages"] for s in state["threads"]}
+        return self.case, {
+            s: self._client_call(self.client.thread, session_id, s)["messages"] for s in state["threads"]
+        }
 
     def send(self, supplier_id, message):
-        return self.client.send_message(self.session_id, supplier_id, message)
+        return self._client_call(self.client.send_message, self.session_id, supplier_id, message)
 
     def close(self, supplier_id, message):
-        reply = self.client.send_message(self.session_id, supplier_id, message)
+        reply = self.send(supplier_id, message)
         return reply.get("result", reply)  # the supplier's last e-mail carries the result
 
     def attachment(self, attachment_id):
-        return self.client.attachment(self.session_id, attachment_id)
+        return self._client_call(self.client.attachment, self.session_id, attachment_id)
 
     def refresh_threads(self, previous):
         """Authoritative pre-close snapshot, including separately returned timeouts.
@@ -79,7 +92,7 @@ class RemoteTable:
         Idle RFQ threads can change while another supplier negotiates. GET does
         not extend their deadlines: this prevents stale acceptance, not timeouts.
         """
-        state = self.client.session(self.session_id)
+        state = self._client_call(self.client.session, self.session_id)
         if state.get("status") == "ended":
             self.done = state.get("result") or self.result()
             return {}
@@ -87,7 +100,7 @@ class RemoteTable:
                   for event in events for att in event.get("attachments", []) if att.get("attachment_id")}
         refreshed = {}
         for sid in state["threads"]:
-            thread = self.client.thread(self.session_id, sid)
+            thread = self._client_call(self.client.thread, self.session_id, sid)
             events = current_thread_events(thread)
             for event in events:
                 for att in event.get("attachments", []):
@@ -102,10 +115,10 @@ class RemoteTable:
     def missed(self, supplier_id, error):
         """After a 409: the result if the case has ended (e.g. at a wave's cap), else what the
         thread now says (a timeout answer, or the reason it ended)."""
-        state = self.client.session(self.session_id)
+        state = self._client_call(self.client.session, self.session_id)
         if state.get("status") == "ended":
             return {"result": state.get("result") or {"deal": False, "end_reason": state.get("end_reason")}}
-        t = self.client.thread(self.session_id, supplier_id)
+        t = self._client_call(self.client.thread, self.session_id, supplier_id)
         last = (t.get("timeouts") or [{}])[-1]
         sheet = [{"term_sheet_id": t["offer_id"], "terms": last.get("terms", {})}]
         return {
@@ -118,7 +131,7 @@ class RemoteTable:
         }
 
     def result(self):
-        state = self.client.session(self.session_id)
+        state = self._client_call(self.client.session, self.session_id)
         return state.get("result") or {"deal": False, "end_reason": state.get("end_reason"), **state}
 
 
@@ -343,6 +356,9 @@ def _send_batch(table, decisions):
 def play(table, case_id, agent, deadline=None):
     """Play one case to its end. `deadline` (time.time(), or a function returning it): a Live Final
     wave's cap - shortly before it, `closing_move` closes the case so it does not end without a deal."""
+    set_deadline = getattr(table, "set_deadline", None)
+    if callable(set_deadline):
+        set_deadline(deadline)
     case, threads = table.open(case_id)
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
