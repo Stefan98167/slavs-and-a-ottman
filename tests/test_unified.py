@@ -130,6 +130,10 @@ def test_unified_agent_filters_profile_trade_through_must_haves(monkeypatch):
 
     assert out["message"].get("term_sheets")
     assert all(sheet["terms"]["payment_days"] >= 30 for sheet in out["message"]["term_sheets"])
+    assert "cash sensitive package trade" not in out["message"]["body"]
+    assert "earlier payment" not in out["message"]["body"]
+    assert "payment in 30 days" in out["message"]["body"]
+    assert "Option 1: unit price" in out["message"]["body"]
 
 
 def test_unified_agent_does_not_send_packages_above_the_fallback_reservation():
@@ -155,6 +159,56 @@ def test_unified_agent_holds_once_after_supplier_repeats_its_standing_offer():
     assert "cost breakdown" in hold["message"]["body"]
     assert agent.decision_history[-1]["action"] == "hold"
     assert agent.decision_history[-1]["supplier_status"] == "open"
+
+
+def test_unified_agent_does_not_repeat_a_refused_cost_breakdown_request():
+    agent = UnifiedAgent()
+    events = [supplier("open", 42.0)]
+    first = agent.decide(CASE, {"sup:A": events})
+    events.extend([
+        {**first["message"], "from": "buyer"},
+        supplier("open", 42.0, body="We do not disclose internal cost breakdowns."),
+    ])
+
+    hold = agent.decide(CASE, {"sup:A": events})
+
+    assert agent.decision_history[-1]["action"] == "hold"
+    assert "term preventing approval" in hold["message"]["body"]
+    assert "cost breakdown" not in hold["message"]["body"]
+
+
+def test_unified_agent_clarifies_a_standing_sheet_that_supplier_says_is_infeasible():
+    case_path = Path(__file__).parents[1] / "arena_kit" / "sim_cases" / "S02.json"
+    case = json.loads(case_path.read_text())
+    agent = UnifiedAgent()
+    opening = supplier(
+        "open", 16.0,
+        body="A lead time of 35 days is not feasible; 54 days is required.",
+    )
+    opening["term_sheets"][0]["terms"]["lead_time_days"] = 35
+    events = [opening]
+
+    clarification = agent.decide(case, {"sup:A": events})
+
+    assert agent.decision_history[-1]["action"] == "clarify_terms"
+    assert "35 days" in clarification["message"]["body"]
+    assert "Please reconcile the lead time" in clarification["message"]["body"]
+    assert "term_sheets" not in clarification["message"]
+
+    events.extend([{**clarification["message"], "from": "buyer"},
+                   supplier("final_offer", 15.8,
+                            body="15.80 is our final price.")])
+    events[-1]["term_sheets"][0]["terms"]["lead_time_days"] = 35
+
+    result = agent.decide(case, {"sup:A": events})
+
+    assert result["message"]["action"] == {"type": "walk_away"}
+
+    confirmed = supplier("final_offer", 15.8, body="We confirm a lead time of 35 days is feasible.")
+    confirmed["term_sheets"][0]["terms"]["lead_time_days"] = 35
+    resolved = UnifiedAgent().decide(case, {"sup:A": [*events[:-1], confirmed]})
+
+    assert resolved["message"]["action"] == {"type": "accept", "term_sheet_id": "offer:15.8"}
 
 
 def test_unified_agent_accepts_an_acceptable_offer_after_no_progress_on_hold():
@@ -249,6 +303,28 @@ def test_unified_agent_accepts_a_final_offer_only_when_it_beats_the_alternative(
     out = UnifiedAgent().decide(case, {"sup:A": [supplier("final_offer", 42.0)]})
 
     assert out["message"]["action"] == {"type": "accept", "term_sheet_id": "offer:42.0"}
+
+
+def test_unified_agent_chooses_cheapest_standing_supplier_when_another_goes_final():
+    out = UnifiedAgent().decide(CASE, {
+        "sup:expensive": [supplier("final_offer", 42.0)],
+        "sup:cheap": [supplier("open", 41.0)],
+    })
+
+    assert out["supplier_id"] == "sup:cheap"
+    assert out["message"]["action"] == {"type": "accept", "term_sheet_id": "offer:41.0"}
+
+
+def test_unified_agent_rejects_a_cheaper_final_offer_that_breaks_a_delivery_must_have():
+    case_path = Path(__file__).parents[1] / "arena_kit" / "sim_cases" / "S02.json"
+    case = json.loads(case_path.read_text())
+    case["buyer"]["must_haves"] = [{"field": "lead_time_days", "op": "<=", "value": 35}]
+    final = supplier("final_offer", 15.0)
+    final["term_sheets"][0]["terms"]["lead_time_days"] = 49
+
+    out = UnifiedAgent().decide(case, {"sup:A": [final]})
+
+    assert out["message"]["action"] == {"type": "walk_away"}
 
 
 def test_unified_agent_walks_away_from_a_final_offer_worse_than_the_alternative():

@@ -10,6 +10,21 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 - [Unified agent](arena_kit/agents/unified.py): connects live supplier evidence to buyer-costed package selection and reservation-aware multi-round decisions.
 - [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving CSV parsing, with an option to pass parsed rows into the intelligence component.
 
+## Practice findings and MVP gate
+
+[Ahmet's replay findings](brief/replay-findings-tuning.md) cover hosted P10, P01, and P08
+negotiations. The `unified` agent uses those lessons to avoid repeating a refused cost-breakdown
+request and to seek clarification when a supplier explicitly rejects the lead time in its own
+standing sheet. It keeps that conflict open until the supplier confirms a feasible matching term.
+Outbound package messages list the actual term-sheet options and describe a profile-based trade
+only when the sent package really changes the supplier-favourable term.
+
+[Georgi's quality gate](QUALITY_GATE.md) and [score log](PRACTICE_SCORE_LOG.md) are a historical
+review of worktree `b56b7ff+dirty`. Their local scores belong to `StrategicAgent`, which is not
+present in this checkout; they are not scores for `unified`. The LLM factual-claim restriction in
+that review still applies. Keep `unified` selectable with `--agent unified` until current hosted
+practice replays demonstrate the MVP gate in [TODO.md](TODO.md).
+
 ## Supplier-only input policy
 
 The supplier parser and intelligence component use only supplier-uploaded files and

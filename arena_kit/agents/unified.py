@@ -11,6 +11,7 @@ from negotiator.package_policy import CLAIM_ADJUSTMENT_CAP_PCT, plan_packages
 from negotiator.packages import PackageInputError, generate_packages
 from negotiator.supplier_evidence import build_thread_supplier_context, context_for_part
 
+from ..cost import closing_terms
 from ..docs import standard_terms
 from ..play import latest, live_threads, moves_left, standing
 
@@ -39,13 +40,22 @@ class UnifiedAgent:
             or moves_left(case, threads[offer["supplier_id"]]) <= 1
         ]
         if final_or_last:
-            return self._accept(min(final_or_last, key=lambda offer: offer["standing_cost"]))
+            # A final offer on one thread does not make a dearer deal preferable
+            # to a cheaper standing offer from another supplier.
+            return self._accept(min(acceptable, key=lambda offer: offer["standing_cost"]))
 
         candidates = []
         holds = []
+        clarifications = []
         for offer in standing_offers:
             events = threads[offer["supplier_id"]]
             status = latest(events).get("status")
+            if offer["response_conflict"]:
+                previous_buyer = _last_buyer_message(events)
+                if (status == "open" and offer["remaining_moves"] > 0
+                        and not _asked_to_reconcile(previous_buyer)):
+                    clarifications.append(offer)
+                continue
             if status in {"agreed", "final_offer"} or offer["remaining_moves"] <= 0:
                 continue
             previous_buyer = _last_buyer_message(events)
@@ -61,7 +71,9 @@ class UnifiedAgent:
             if candidate is not None:
                 candidates.append(candidate)
         if candidates:
-            return self._counter(min(candidates, key=lambda candidate: candidate["best_cost"]))
+            return self._counter(min(candidates, key=lambda candidate: candidate["best_cost"]), case)
+        if clarifications:
+            return self._clarify(min(clarifications, key=lambda offer: offer["standing_cost"]))
         if holds:
             return self._hold(min(holds, key=lambda offer: offer["standing_cost"]))
         if acceptable:
@@ -97,20 +109,26 @@ class UnifiedAgent:
             cost = evaluation["buyer"]["total_cost"]
             if cost is None:
                 continue
+            closed_terms = closing_terms(case, evaluation["final_terms"], standard)
+            response_conflict = _thread_response_conflict(events, closed_terms)
             offers.append({
                 "supplier_id": supplier_id,
                 "offer_id": offer_id,
                 "terms": deepcopy(terms),
                 "standard": standard,
                 "evaluation": evaluation,
+                "closed_terms": closed_terms,
                 "standing_cost": cost,
                 "reservation_cost": _reservation_cost(case, evaluation),
                 "status": latest(events).get("status"),
                 "remaining_moves": moves_left(case, events),
                 "claim_results": deepcopy(latest(events).get("claim_results") or []),
+                "response_conflict": response_conflict,
+                "cost_breakdown_refused": _cost_breakdown_refused(events),
                 "acceptable": (
                     evaluation["valid_for_negotiation"]
                     and evaluation["buyer"]["total_cost"] <= _reservation_cost(case, evaluation)
+                    and not response_conflict
                 ),
             })
         return offers
@@ -169,12 +187,12 @@ class UnifiedAgent:
             "best_cost": packages[0]["evaluation"]["buyer"]["total_cost"],
         }
 
-    def _counter(self, candidate):
+    def _counter(self, candidate, case):
         offer = candidate["offer"]
         packages = candidate["packages"]
         message = {
             "subject": latest_context_subject(offer["supplier_id"], candidate["context"]),
-            "body": self._body(candidate["context"], candidate["plan"], packages),
+            "body": self._body(candidate["context"], candidate["plan"], packages, offer, case),
             "term_sheets": [{"terms": package["terms"]} for package in packages],
         }
         if candidate["plan"]["profile_refs"]:
@@ -218,12 +236,12 @@ class UnifiedAgent:
         return {"supplier_id": offer["supplier_id"], "message": message}
 
     def _hold(self, offer):
+        body = "Before we send another counter, could you identify the term preventing approval?"
+        if not offer["cost_breakdown_refused"]:
+            body += " If available, please share the supporting cost breakdown."
         message = {
             "subject": latest_context_subject(offer["supplier_id"], None),
-            "body": (
-                "Before we send another counter, could you identify the term preventing approval "
-                "and share the supporting cost breakdown? That will help us assess a workable package."
-            ),
+            "body": body,
         }
         self.decision_history.append({
             "supplier_id": offer["supplier_id"],
@@ -236,6 +254,27 @@ class UnifiedAgent:
             "supplier_status": offer["status"],
             "supplier_claim_results": offer["claim_results"],
             "reason": "supplier standing terms did not improve after the buyer's package counter",
+            "message": message,
+        })
+        return {"supplier_id": offer["supplier_id"], "message": message}
+
+    def _clarify(self, offer):
+        lead_time = offer["closed_terms"]["lead_time_days"]
+        message = {
+            "subject": latest_context_subject(offer["supplier_id"], None),
+            "body": (
+                "Your message and standing term sheet differ on lead time: the sheet lists "
+                f"{lead_time} days, but your message says that is not feasible. "
+                "Please reconcile the lead time and send one matching price, volume, and delivery package."
+            ),
+        }
+        self.decision_history.append({
+            "supplier_id": offer["supplier_id"],
+            "offer_id": offer["offer_id"],
+            "action": "clarify_terms",
+            "response_conflict": offer["response_conflict"],
+            "standing_total_cost": offer["standing_cost"],
+            "reservation_cost": offer["reservation_cost"],
             "message": message,
         })
         return {"supplier_id": offer["supplier_id"], "message": message}
@@ -266,18 +305,20 @@ class UnifiedAgent:
         return context_for_part(bundle, part_id)
 
     @staticmethod
-    def _body(context, plan, packages):
+    def _body(context, plan, packages, offer, case):
         evidence = _lead_text(context)
-        trade_notes = []
         used_trades = []
+        standing_terms = offer["evaluation"]["final_terms"]
         for package in packages:
-            price = package["terms"]["unit_price"]
-            trade_notes.extend(plan["rationales_by_price"].get(price, []))
             for hypothesis in plan["trade_hypotheses"]:
                 if all(package["terms"].get(field) == value
+                       and standing_terms.get(field) != value
                        for field, value in hypothesis["buyer_gives"].items()):
                     used_trades.append(hypothesis)
-        terms = "; ".join(dict.fromkeys(trade_notes))
+        options = "; ".join(
+            f"Option {index}: {_describe_terms(package['terms'], case)}"
+            for index, package in enumerate(packages, 1)
+        )
         claim_sentences = [
             _claim_citation(claim) for claim in plan.get("supplier_claims_used", [])[:3]
         ]
@@ -311,12 +352,12 @@ class UnifiedAgent:
             if claim_sentences else ""
         )
         return (
-            "Thank you for the quotation. We can proceed with one of the attached valid packages; "
-            "please confirm which is workable." + evidence_sentence
+            "Thank you for the quotation. Please review these complete term-sheet options: "
+            + options + ". Please confirm which option you can accept." + evidence_sentence
             + (" " + " ".join(claim_sentences) + claim_note if claim_sentences else "")
             + (" " + " ".join(dict.fromkeys(trade_sentences)) if trade_sentences else "")
-            + (f" The packages reflect: {terms}." if terms else "")
-            + " Please share the supporting cost breakdown."
+            + (" If available, please share the supporting cost breakdown."
+               if not offer["cost_breakdown_refused"] else "")
         )[:8000]
 
 
@@ -433,6 +474,103 @@ def _effective_standing_terms(case, terms, standard):
     negotiable = case.get("negotiable", [])
     supplier_defaults = {field: standard[field] for field in negotiable if field in standard}
     return {**supplier_defaults, **terms}
+
+
+def _response_conflict(message, terms):
+    """Flag an explicit rejection of the lead time in the standing sheet."""
+    lead_time = terms.get("lead_time_days")
+    if isinstance(lead_time, bool) or not isinstance(lead_time, (int, float)):
+        return None
+    body = message.get("body") or ""
+    if not isinstance(body, str):
+        return None
+    days = re.escape(f"{lead_time:g}")
+    rejection = r"(?:not feasible|not possible|impossible|cannot be met|can't be met)"
+    patterns = (
+        rf"\blead[\s-]*time(?:\s+of)?\s+{days}\s*days?\b.{{0,45}}\b{rejection}\b",
+        rf"\b{days}[\s-]*day\s+lead[\s-]*time\b.{{0,45}}\b{rejection}\b",
+    )
+    if any(re.search(pattern, body, re.IGNORECASE | re.DOTALL) for pattern in patterns):
+        return f"supplier rejected the standing {lead_time:g}-day lead time in its message"
+    return None
+
+
+def _thread_response_conflict(events, terms):
+    """Keep an explicit contradiction until the supplier resolves it in writing."""
+    conflict = None
+    for event in events:
+        if event.get("from") == "buyer":
+            continue
+        if rejection := _response_conflict(event, terms):
+            conflict = rejection
+        elif conflict and _lead_time_confirmed(event, terms):
+            conflict = None
+    return conflict
+
+
+def _lead_time_confirmed(message, terms):
+    lead_time = terms.get("lead_time_days")
+    if isinstance(lead_time, bool) or not isinstance(lead_time, (int, float)):
+        return False
+    body = message.get("body") or ""
+    if not isinstance(body, str):
+        return False
+    days = re.escape(f"{lead_time:g}")
+    patterns = (
+        rf"\b(?:we|i)\s+confirm\b.{{0,50}}\blead[\s-]*time(?:\s+of)?\s+{days}\s*days?\b",
+        rf"\blead[\s-]*time(?:\s+of)?\s+{days}\s*days?\b.{{0,15}}\bis feasible\b",
+        rf"\b{days}[\s-]*day\s+lead[\s-]*time\b.{{0,15}}\bis feasible\b",
+    )
+    return any(re.search(pattern, body, re.IGNORECASE | re.DOTALL) for pattern in patterns)
+
+
+def _asked_to_reconcile(buyer_message):
+    return bool(
+        buyer_message and "please reconcile the lead time" in str(buyer_message.get("body", "")).lower()
+    )
+
+
+def _cost_breakdown_refused(events):
+    for event in events:
+        if event.get("from") == "buyer":
+            continue
+        body = event.get("body")
+        if not isinstance(body, str):
+            continue
+        text = body.lower()
+        about_costs = "cost breakdown" in text or "calculation" in text
+        refused = (
+            bool(re.search(r"\b(?:do not|don't|cannot|can't|won't|will not)\s+(?:\w+\s+){0,3}"
+                           r"(?:disclose|share|provide)\b", text))
+            or "stays internal" in text
+            or "remains internal" in text
+        )
+        if about_costs and refused:
+            return True
+    return False
+
+
+def _describe_terms(terms, case):
+    descriptions = []
+    for field in case.get("negotiable", []):
+        if field not in terms:
+            continue
+        value = terms[field]
+        if field == "unit_price" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            descriptions.append(f"unit price {value:.2f} per unit")
+        elif field == "payment_days":
+            descriptions.append(f"payment in {value} days")
+        elif field == "lead_time_days":
+            descriptions.append(f"{value}-day lead time")
+        elif field == "contract_months":
+            descriptions.append(f"{value}-month contract")
+        elif field == "volume_per_year":
+            descriptions.append(f"{value} units per year")
+        elif field == "incoterm":
+            descriptions.append(f"{value} delivery")
+        else:
+            descriptions.append(f"{field.replace('_', ' ')} {value}")
+    return ", ".join(descriptions)
 
 
 def _supplier_progress(case, events, current_offer):
