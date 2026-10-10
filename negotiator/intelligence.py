@@ -28,6 +28,16 @@ _PROFILE_DIMENSIONS = (
     "price_rigid",
     "quality_sensitive",
 )
+_CANONICAL_FIELD_ALIASES = {
+    "supplier_id": {"supplier_id", "supplier id", "supplier", "supplier number"},
+    "part_id": {"part_id", "part id", "part", "part number", "item", "item number"},
+    "unit_price": {"unit_price", "unit price", "price", "preis"},
+    "quote_date": {"quote_date", "quote date", "date", "offer date"},
+    "currency": {"currency", "currency code", "währung", "waehrung"},
+    "payment_days": {"payment_days", "payment days", "payment terms", "zahlungsziel"},
+    "lead_time_days": {"lead_time_days", "lead time", "lead time days", "delivery days"},
+    "incoterm": {"incoterm", "incoterms"},
+}
 
 
 def load_evidence(source: str | Path | list[object]) -> list[dict[str, Any]]:
@@ -76,6 +86,44 @@ def filter_evidence(
     ]
 
 
+def bind_evidence_scope(
+    evidence: list[Mapping[str, Any]], supplier_id: str, part_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Bind unscopeable supplier-upload records to the live negotiation identity.
+
+    A supplier attachment often has commercial rows but no arena supplier or part ID.  The
+    caller already knows that identity from the live supplier thread, so this function attaches
+    it explicitly rather than trying to infer it from CSV content.  Existing non-empty IDs must
+    agree with the supplied scope; disagreement raises :class:`EvidenceInputError` to prevent
+    evidence from one supplier being silently used for another.
+    """
+    if not isinstance(supplier_id, str) or not supplier_id:
+        raise EvidenceInputError("supplier_id must be a non-empty string when binding evidence scope")
+    if part_id is not None and (not isinstance(part_id, str) or not part_id):
+        raise EvidenceInputError("part_id must be a non-empty string or None when binding evidence scope")
+
+    bound: list[dict[str, Any]] = []
+    for index, record in enumerate(evidence):
+        if not isinstance(record, Mapping):
+            raise EvidenceInputError(f"evidence record at index {index} must be an object")
+        existing_supplier = record.get("supplier_id")
+        existing_part = record.get("part_id")
+        if existing_supplier not in (None, supplier_id):
+            raise EvidenceInputError(
+                f"evidence record at index {index} belongs to {existing_supplier!r}, not {supplier_id!r}"
+            )
+        if part_id is not None and existing_part not in (None, part_id):
+            raise EvidenceInputError(
+                f"evidence record at index {index} belongs to part {existing_part!r}, not {part_id!r}"
+            )
+        copy = dict(record)
+        copy["supplier_id"] = supplier_id
+        if part_id is not None:
+            copy["part_id"] = part_id
+        bound.append(copy)
+    return bound
+
+
 def build_supplier_context(
     evidence: list[Mapping[str, Any]], supplier_id: str, part_id: str | None = None
 ) -> dict[str, Any]:
@@ -100,12 +148,16 @@ def build_supplier_context(
 def _normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
     information_value = record.get("Information", {})
     information = _normalize_value(information_value) if isinstance(information_value, Mapping) else {}
+    if isinstance(information, Mapping):
+        information = _canonicalize_information(information)
     wrapper_fields = {key: _normalize_value(value) for key, value in record.items() if key not in _WRAPPER_KEYS}
     if "Information" in record and not isinstance(information_value, Mapping):
         # A malformed or future non-object payload is retained rather than preventing unrelated
         # evidence from being ingested. It simply cannot supply the standard identity fields.
         wrapper_fields["Information"] = _normalize_value(information_value)
-    record_id = information.get("id") or wrapper_fields.get("id")
+    # CSV extracts retain an exact line-range source but normally have no separate ID.  The
+    # source is therefore the stable evidence ID for those records, preserving traceability.
+    record_id = information.get("id") or wrapper_fields.get("id") or record.get("Source")
     return {
         "id": record_id,
         "kind": _evidence_kind(information, wrapper_fields, record_id),
@@ -144,8 +196,36 @@ def _evidence_kind(information: Mapping[str, Any], wrapper_fields: Mapping[str, 
         if isinstance(value, str) and value:
             return value
     if isinstance(record_id, str) and ":" in record_id:
-        return record_id.split(":", 1)[0]
+        prefix = record_id.split(":", 1)[0]
+        if prefix in {"quote", "document", "payment", "financial", "capacity", "quality"}:
+            return prefix
+    # An extracted supplier row with a recognizable price field is commercial quote evidence,
+    # not a basis for inferring supplier pressure or preferences.
+    if "unit_price" in information:
+        return "quote"
     return "unknown"
+
+
+def _canonicalize_information(information: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain supplied CSV headers and expose a small set of deterministic aliases."""
+    result = dict(information)
+    normalized_keys = {
+        _header_key(str(key)): key
+        for key in information
+    }
+    for canonical, aliases in _CANONICAL_FIELD_ALIASES.items():
+        if canonical in result:
+            continue
+        for alias in aliases:
+            original_key = normalized_keys.get(_header_key(alias))
+            if original_key is not None:
+                result[canonical] = information[original_key]
+                break
+    return result
+
+
+def _header_key(value: str) -> str:
+    return " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
 
 
 def _context_evidence(record: Mapping[str, Any]) -> dict[str, Any]:

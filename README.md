@@ -6,6 +6,7 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 
 - [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal.
 - [MVP intelligence](MVP_INTELLIGENCE.md): ingestion and traceable supplier context from the data-analysis team's JSON evidence output.
+- [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving conversion of supplier attachments into the shared evidence JSON format; optional priority ranking is available to the data-preparation team.
 
 ## Run the baseline agent
 

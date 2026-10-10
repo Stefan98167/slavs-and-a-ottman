@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from negotiator.intelligence import EvidenceInputError, build_supplier_context, filter_evidence, load_evidence
+from negotiator.intelligence import (
+    EvidenceInputError,
+    bind_evidence_scope,
+    build_supplier_context,
+    filter_evidence,
+    load_evidence,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "intelligence_quotes.json"
 
@@ -61,6 +67,35 @@ def test_future_evidence_and_non_quote_fields_are_tolerated():
     assert context["evidence"][0]["data"]["reviewed"] is False
     assert context["evidence"][0]["record_fields"]["Extra Wrapper Field"]["score"] == 1.5
     assert context["quote_history"]["count"] == 0
+
+
+def test_supplier_csv_records_can_be_bound_to_live_scope_with_traceable_quote_history():
+    extracted = [
+        {
+            "Information": {"Unit Price": "17.47", "Currency": "EUR", "Payment Terms": "30"},
+            "Source": "supplier_upload.csv:2",
+            "Priority (Argument wise)": 1,
+        }
+    ]
+    evidence = bind_evidence_scope(load_evidence(extracted), "sup:live", "part:live")
+    context = build_supplier_context(evidence, "sup:live", "part:live")
+
+    assert context["quote_history"]["count"] == 1
+    assert context["quote_history"]["min_unit_price"] == 17.47
+    assert context["quote_history"]["fact_sources"]["min_unit_price"] == [
+        {"evidence_id": "supplier_upload.csv:2", "source": "supplier_upload.csv:2"}
+    ]
+    assert context["evidence"][0]["data"]["Unit Price"] == 17.47
+    assert context["evidence"][0]["data"]["unit_price"] == 17.47
+
+
+def test_scope_binding_refuses_a_conflicting_explicit_identity():
+    evidence = load_evidence([
+        {"Information": {"supplier_id": "sup:other"}, "Source": "supplier_upload.csv:2"}
+    ])
+
+    with pytest.raises(EvidenceInputError, match="belongs to"):
+        bind_evidence_scope(evidence, "sup:live")
 
 
 @pytest.mark.parametrize("value", [{}, 3])

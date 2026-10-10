@@ -4,6 +4,12 @@
 JSON-serializable supplier context. It complements `negotiator/evaluator.py`: intelligence
 organizes evidence; the evaluator assesses proposed deal terms.
 
+Supplier CSV attachments can first be converted with `arena_kit.quote_extract`. That extractor
+keeps every row, its original headers, and a `Source` with the attachment name and physical line.
+It rejects the bundled `data/data/` directory, so production evidence comes from the supplier's
+actual message attachment rather than local practice material. Its optional LLM priority mode is
+for the data-preparation team only; this intelligence module never makes an LLM call.
+
 ## Current input
 
 The input is a JSON array. Current records use an `Information` object plus `Source` and
@@ -15,6 +21,13 @@ The input is a JSON array. Current records use an `Information` object plus `Sou
 encodings (for example, `"142.5"` and `"true"`) while preserving `Information`, source, priority,
 and unfamiliar wrapper fields. Records merely need to be JSON objects, which lets future evidence
 types pass through even when their `Information` fields differ from quotes.
+
+Extractor records do not need arena identities in the CSV. After the live negotiation thread
+supplies the supplier and optional part ID, call `bind_evidence_scope(evidence, supplier_id,
+part_id)`. It adds that explicit scope only when no conflicting ID was supplied; it never guesses
+the identity. Common CSV headers such as `Unit Price`, `Price`, and `Payment Terms` are exposed as
+canonical fields while the original headers remain intact. If an extractor record has no separate
+ID, its source line is also used as its stable evidence ID.
 
 ## Output
 
