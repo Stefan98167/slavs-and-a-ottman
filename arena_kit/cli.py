@@ -27,13 +27,15 @@ def load_env(path=".env"):
 
 
 def agent_factory(name, data, evidence=None):
-    from .agents import DummyAgent, LLMAgent, NaiveAgent, llm_from_env
+    from .agents import DummyAgent, LLMAgent, NaiveAgent, PackageAgent, llm_from_env
 
     if name == "dummy":
         records = json.loads(Path(evidence).read_text(encoding="utf-8-sig")) if evidence else []
         return lambda: DummyAgent(records)
     if name == "naive":
         return NaiveAgent
+    if name == "packages":
+        return PackageAgent
     package = None
     if data:
         from .data import DataPackage
@@ -68,19 +70,19 @@ def main(argv=None):
     c.add_argument("--set", **sets)
     p = sub.add_parser("play", help="play one case")
     p.add_argument("case_id")
-    p.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy"])
+    p.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy", "packages"])
     p.add_argument("--evidence", type=Path, help="Extractor JSON with priorities, for --agent dummy")
     p.add_argument("--data", **data)
     a = sub.add_parser("run", help="play every case of a set in parallel")
     a.add_argument("--set", **sets)
-    a.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy"])
+    a.add_argument("--agent", default="naive", choices=["naive", "llm", "dummy", "packages"])
     a.add_argument("--evidence", type=Path, help="Extractor JSON with priorities, for --agent dummy")
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed")
     s = sub.add_parser("simulate", help="run a negotiation entirely locally, without HTTP or model calls")
     s.add_argument("case_id", nargs="?", default="case:S01")
-    s.add_argument("--agent", choices=["dummy", "naive"], default="dummy")
+    s.add_argument("--agent", choices=["dummy", "naive", "packages"], default="dummy")
     s.add_argument("--evidence", type=Path, help="Extractor JSON with priorities for the dummy")
     s.add_argument("--out", type=Path, help="Save result, messages and dummy decisions as JSON")
     d = sub.add_parser("data", help="download and unpack the data (package, Sunday release once public)")
@@ -157,7 +159,9 @@ def main(argv=None):
         if replay:  # the supplier's reasons, move by move: read it, improve, play again
             print(f"replay: {os.environ['ARENA_URL'].rstrip('/')}{replay}")
     elif args.set == "final":  # waits for each wave and plays its cases within the cap
-        out = play_waves(client, agent_factory(args.agent, args.data, args.evidence), args.waves, min(args.parallel, 10))
+        out = play_waves(
+            client, agent_factory(args.agent, args.data, args.evidence), args.waves, min(args.parallel, 10)
+        )
     else:
         ids = [case["case_id"] for case in hosted(client.cases(args.set))]
         out = play_all(
