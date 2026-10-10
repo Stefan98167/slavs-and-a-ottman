@@ -1,29 +1,34 @@
 # Slavs and an Ottoman
 
-A hackathon project repository.
+Buyer-agent project for the Tacto Negotiation Arena. The repository includes the arena's Python starter kit, case data, and brief. The upstream kit snapshot is from `tacto-ai/negotiation-arena-kit` commit `1b5516bb95ef28e37f69aa446dc62168864bca53`.
 
-## About
+## Run the baseline agent
 
-This repository is the starting point for **Slavs and an Ottoman**. The project brief, intended audience, and planned features have not yet been recorded here; add them as the team defines the direction during the hackathon.
+Requires Python 3.12 and `uv`.
 
-## Project status
+```bash
+uv sync --all-extras
+cp .env.example .env   # then set ARENA_API_KEY and any LLM credentials
+uv run arena me
+uv run arena play case:P01
+```
 
-The repository currently contains its project setup and this README. No application code or runnable prototype has been added yet.
+`arena me` checks the arena key and quota. `arena play` starts a hosted practice session and uses one session from the team's rolling 24-hour quota. The default agent is the naive baseline in `arena_kit/agents/naive.py`.
 
-## Getting started
+To download the data package for the LLM agent and local data tools:
 
-There is no application to run yet. Once the team chooses a stack, document the prerequisites and setup steps here. At minimum, include:
+```bash
+uv run arena data
+uv run arena play case:P01 --agent llm
+```
 
-1. Required tools and versions
-2. Installation steps
-3. The command to start the project
-4. Any environment variables or services needed
+Read [the challenge brief](brief/brief.md), [API docs](brief/api.md), and [starter-kit guide](STARTER_KIT.md). The case data and supplier documents are in `data/`; `data/README.md` explains the CSV, SQLite database, facts, and document IDs.
 
-## Team and contributions
+## Develop the agent
 
-Add team members, roles, and contribution guidance here. During the hackathon, keep this README updated with the project idea, implemented features, and instructions for trying the latest build.
+The default strategy lives in `arena_kit/agents/naive.py`. Its `decide(case, threads)` method returns a supplier ID and a message. The runner and HTTP client handle sessions, email messages, replies, and closing actions. The LLM example is in `arena_kit/agents/llm.py`.
 
-## Agent session tracking
+## Entire session tracking
 
 This repository uses [Entire](https://entire.io/) to save coding-agent session context alongside Git history. Contributors using Codex can install and enable the Entire CLI from the repository:
 
