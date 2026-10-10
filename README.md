@@ -45,6 +45,29 @@ distinct package choices, and concurrent supplier requests within an RFQ. The
 quality trade requires a concrete supplier ppm guarantee; a generic quality
 statement cannot authorize an invented target.
 
+## Run the final
+
+Set `ARENA_URL` and `ARENA_API_KEY` in `.env` (names only; never commit the file), then install the
+locked dependencies with `uv sync`. After the organizers publish the Sunday data at 08:00, run
+`uv run arena data` to unpack it under `data/`. Unified reads that archive when explicitly started
+with `--data data`, or when `ARENA_DATA=data` is set.
+
+```bash
+uv run arena run --set final --agent unified --parallel 10 --waves 5 -v
+```
+
+For unattended restarts, use `scripts/run_final.sh`; it waits for five waves, resumes open sessions
+after a crash, and appends logs under the ignored `logs/` directory. Optional behavior is off by
+default: `--rfq-keepalive` holds qualifying idle RFQ threads, `SUPPLIER_ECONOMICS=1` includes
+fact-based supplier relationship cost, and `SUPPLIER_ARCHIVE_EVIDENCE=1` loads archived
+release letters/news without passing `--data`. Fact-based relationship costs are not calibrated
+closely to saved P02/P03 Arena costs, so leave that flag off for the Live Final unless the team
+validates the cost-fact semantics first.
+
+Approach: prepare each case from its permitted data, read the supplier's current offer and
+evidence, compare complete packages against buyer requirements and reservation cost, then accept
+the best valid standing offer or walk away before the wave deadline.
+
 ```bash
 # Include relevant supplier-authored letters from the package and Sunday release.
 .venv/bin/python -m arena_kit.cli play case:P01 --agent unified --data data
@@ -65,7 +88,8 @@ statement cannot authorize an invented target.
 Validation stores the selection seed, source fingerprint, actual transcripts,
 decisions, scores, replay links and contract audits under the ignored
 `output/validation/` directory. These files contain no copied environment keys.
-The default agent remains `supplier`; select `unified` explicitly.
+The CLI's legacy default remains `supplier`; the Live Final command above explicitly selects
+`unified`, while `supplier`, `packages`, `advanced`, `naive`, and `llm` remain runnable comparisons.
 
 [Ahmet's replay findings](brief/replay-findings-tuning.md) cover hosted P10, P01, and P08
 negotiations. The `unified` agent uses those lessons to avoid repeating a refused cost-breakdown
@@ -244,7 +268,7 @@ uv run arena me
 uv run arena play case:P01
 ```
 
-`arena me` checks the arena key and quota. `arena play` starts a hosted practice session and uses one session from the team's rolling 24-hour quota. The default agent is the supplier-only `SupplierContextAgent`; pass `--agent naive` or `--agent llm` only to run a legacy comparison agent.
+`arena me` checks the arena key and quota. `arena play` starts a hosted practice session and uses one session from the team's rolling 24-hour quota. The CLI's default is the supplier-only `SupplierContextAgent`; the team's Live Final command explicitly chooses `--agent unified`.
 
 To download the data package for the LLM agent and local data tools:
 

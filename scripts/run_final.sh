@@ -9,7 +9,7 @@ runner=(uv run arena run --set final --agent unified --parallel 10 --waves 5 -v)
 if [[ "$(uname -s)" == Linux ]] && command -v systemd-inhibit >/dev/null 2>&1; then
   command=(systemd-inhibit --what=sleep --why="Tacto Negotiation Arena Live Final" --mode=block -- "${runner[@]}")
 elif [[ "$(uname -s)" == Darwin ]] && command -v caffeinate >/dev/null 2>&1; then
-  command=(caffeinate -dims -- "${runner[@]}")
+  command=(caffeinate -dims "${runner[@]}")
 else
   command=("${runner[@]}")
 fi
