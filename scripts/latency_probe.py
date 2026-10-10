@@ -52,7 +52,7 @@ class LatencyTable(SimTable):
         return reply
 
 
-def probe(agent_name, case_id, reply_s, cap_s):
+def probe(agent_name, case_id, reply_s, cap_s, rfq_keepalive=False):
     clock = FakeClock()
     sim = Sim(load_cases(), clock=clock, no_clock=False)
     table = LatencyTable(sim, clock, reply_s)
@@ -62,7 +62,7 @@ def probe(agent_name, case_id, reply_s, cap_s):
     play_module.time = clock
     started = clock.time()
     try:
-        result = play(table, case_id, agent, deadline=started + cap_s)
+        result = play(table, case_id, agent, deadline=started + cap_s, rfq_keepalive=rfq_keepalive)
     finally:
         play_module.time = original_time
     session = sim.sessions[table.session_id]
@@ -71,6 +71,7 @@ def probe(agent_name, case_id, reply_s, cap_s):
         "case_id": case_id,
         "reply_s": reply_s,
         "wave_cap_s": cap_s,
+        "rfq_keepalive": rfq_keepalive,
         "elapsed_fake_s": round(clock.time() - started, 2),
         "deal": result.get("deal"),
         "end_reason": session.get("end_reason"),
@@ -92,10 +93,11 @@ def main(argv=None):
     parser.add_argument("case_id")
     parser.add_argument("reply_s", type=float)
     parser.add_argument("cap_s", type=float)
+    parser.add_argument("--rfq-keepalive", action="store_true")
     args = parser.parse_args(argv)
     import json
 
-    print(json.dumps(probe(args.agent, args.case_id, args.reply_s, args.cap_s), indent=2))
+    print(json.dumps(probe(args.agent, args.case_id, args.reply_s, args.cap_s, args.rfq_keepalive), indent=2))
 
 
 if __name__ == "__main__":

@@ -93,6 +93,9 @@ def main(argv=None):
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed")
+    a.add_argument(
+        "--rfq-keepalive", action="store_true", help="repeat the last buyer offer on idle acceptable Final threads"
+    )
     s = sub.add_parser("simulate", help="run a negotiation entirely locally, without HTTP or model calls")
     s.add_argument("case_id", nargs="?", default="case:S01")
     s.add_argument("--agent", choices=["supplier", "packages", "unified", "advanced", "naive"], default="supplier")
@@ -179,8 +182,11 @@ def main(argv=None):
         if replay:
             print(f"replay: {os.environ['ARENA_URL'].rstrip('/')}{replay}")
     elif args.set == "final":
-        out = play_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10))
+        out = play_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10),
+                         rfq_keepalive=args.rfq_keepalive)
     else:
+        if args.rfq_keepalive:
+            ap.error("--rfq-keepalive is only available with --set final")
         ids = [case["case_id"] for case in hosted(client.cases(args.set))]
         out = play_all(
             lambda: RemoteTable(client),

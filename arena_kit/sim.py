@@ -712,6 +712,7 @@ class SimTable:
     def __init__(self, sim=None):
         self.sim = sim or Sim(load_cases(), no_clock=True)
         self.team, self.session_id = "local-simulator", None
+        self.done = None
         self.sim.teams.setdefault(self.team, "Local simulation")
 
     def _call(self, method, *args):
@@ -725,6 +726,7 @@ class SimTable:
     def open(self, case_id):
         opened = self._call(self.sim.open, case_id)
         self.session_id = opened["session_id"]
+        self.done = None
         return opened["case"], opened["threads"]
 
     def send(self, supplier_id, message):
@@ -747,6 +749,38 @@ class SimTable:
         # This in-process runner has no clock deadline by default. Unexpected
         # conflicts should surface rather than silently replaying stale offers.
         raise error
+
+    def thread_age(self, supplier_id):
+        state = self._call(self.sim.state, self.session_id)
+        if state.get("status") == "ended":
+            self.done = state.get("result") or state
+            return None
+        left = state["threads"][supplier_id].get("seconds_left")
+        return None if left is None else max(0.0, MOVE_S - float(left))
+
+    def refresh_threads(self, previous):
+        """Match RemoteTable's authoritative snapshot interface for offline rehearsal."""
+        from .play import current_thread_events, fetch_documents
+
+        state = self._call(self.sim.state, self.session_id)
+        if state.get("status") == "ended":
+            self.done = state.get("result") or state
+            return {}
+        parsed = {(sid, att.get("attachment_id")): att for sid, events in previous.items()
+                  for event in events for att in event.get("attachments", []) if att.get("attachment_id")}
+        refreshed = {}
+        for sid in state["threads"]:
+            thread = self._call(self.sim.thread, self.session_id, sid)
+            events = current_thread_events(thread)
+            for event in events:
+                for att in event.get("attachments", []):
+                    old = parsed.get((sid, att.get("attachment_id")), {})
+                    for key in ("text", "pdf_parse_error", "csv_records", "supplier_context", "csv_parse_error"):
+                        if key in old:
+                            att[key] = old[key]
+                fetch_documents(self, event, sid)
+            refreshed[sid] = events
+        return refreshed
 
 
 def main(argv=None):

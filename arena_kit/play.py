@@ -29,6 +29,7 @@ MOVE_LIMIT_S = 60
 # In the Live Final, close this long before the wave's cap - or the slowest round of the case so far
 # (your decision plus a supplier reply of up to about a minute) plus a margin, if that is longer.
 CLOSE_BEFORE_CAP_S, ROUND_MARGIN_S = 90, 15
+KEEPALIVE_AFTER_S = 35
 RUNNING = re.compile(r"one session per case in the final: (\S+)")
 # Practice: the case list shows every practice case file; only those marked hosted can be played
 # (a session on another is a 403). Without the marker every listed case counts as hosted.
@@ -133,6 +134,16 @@ class RemoteTable:
     def result(self):
         state = self._client_call(self.client.session, self.session_id)
         return state.get("result") or {"deal": False, "end_reason": state.get("end_reason"), **state}
+
+    def thread_age(self, supplier_id):
+        """Seconds since this supplier's last reply, from the server-owned session clock."""
+        state = self._client_call(self.client.session, self.session_id)
+        if state.get("status") == "ended":
+            self.done = state.get("result") or self.result()
+            return None
+        thread = state.get("threads", {}).get(supplier_id, {})
+        left = thread.get("seconds_left")
+        return None if left is None else max(0.0, MOVE_LIMIT_S - float(left))
 
 
 def latest(events):
@@ -331,6 +342,41 @@ def _recover_and_close(table, case, threads, agent, cause, *, retry_limit=2):
         raise
 
 
+def _keepalive_decisions(table, case, threads, decisions):
+    """Protect an older acceptable RFQ offer while other suppliers are negotiated."""
+    age = getattr(table, "thread_age", None)
+    if not callable(age) or any(item["message"].get("action") for item in decisions):
+        return decisions, threads
+    already_sending = {item["supplier_id"] for item in decisions}
+    aged = [sid for sid in live_threads(threads) if sid not in already_sending
+            and (seconds := age(sid)) is not None and seconds >= KEEPALIVE_AFTER_S]
+    if not aged:
+        return decisions, threads
+    threads = _current_threads(table, threads)
+    if getattr(table, "done", None):
+        return decisions, threads
+    for sid in aged:
+        events = threads.get(sid, [])
+        if not events or sid not in live_threads(threads):
+            continue
+        current = closing_move(case, {sid: events})
+        if latest(events).get("status") != "agreed" and current["message"].get("action", {}).get("type") != "accept":
+            continue
+        last_buyer_sheet = next((sheet for event in reversed(events) if event.get("from") == "buyer"
+                                 for sheet in reversed(event.get("term_sheets") or [])), None)
+        terms = (last_buyer_sheet or {}).get("terms") or {}
+        sheets = [{"terms": dict(terms)}] if set(terms) == set(case.get("negotiable", [])) else []
+        decisions.append({
+            "supplier_id": sid,
+            "message": {
+                "subject": "We are still considering your standing offer",
+                "body": "We are still reviewing your standing offer and will respond shortly.",
+                "term_sheets": sheets,
+            },
+        })
+    return decisions, threads
+
+
 def _send_batch(table, decisions):
     """Service independent supplier threads concurrently; never send a close in a batch."""
     suppliers = [item["supplier_id"] for item in decisions]
@@ -353,7 +399,7 @@ def _send_batch(table, decisions):
             yield future.result()
 
 
-def play(table, case_id, agent, deadline=None):
+def play(table, case_id, agent, deadline=None, *, rfq_keepalive=False):
     """Play one case to its end. `deadline` (time.time(), or a function returning it): a Live Final
     wave's cap - shortly before it, `closing_move` closes the case so it does not end without a deal."""
     set_deadline = getattr(table, "set_deadline", None)
@@ -379,6 +425,10 @@ def play(table, case_id, agent, deadline=None):
             else:
                 batch = getattr(agent, "decide_batch", None)
                 decisions = batch(case, threads) if callable(batch) else [agent.decide(case, threads)]
+                if rfq_keepalive:
+                    decisions, threads = _keepalive_decisions(table, case, threads, decisions)
+                    if getattr(table, "done", None):
+                        return table.done
                 if len(decisions) > 1:
                     ended_result = None
                     try:
@@ -476,7 +526,7 @@ def play_all(new_table, case_ids, new_agent, parallel=8):
         return dict(pool.map(one, case_ids))
 
 
-def play_waves(client, new_agent, waves=5, parallel=10, poll=5.0):
+def play_waves(client, new_agent, waves=5, parallel=10, poll=5.0, *, rfq_keepalive=False):
     """The Live Final: wait for each wave, play its cases in parallel within the wave's cap, wait
     for the next. Keep it running from before the first wave until the last has closed; it returns
     after `waves` waves have closed and every case has finished: {case_id: result or exception}."""
@@ -484,6 +534,9 @@ def play_waves(client, new_agent, waves=5, parallel=10, poll=5.0):
 
     def one(case, deadline):
         try:
+            if rfq_keepalive:
+                return play(RemoteTable(client, case), case["case_id"], new_agent(), deadline,
+                            rfq_keepalive=True)
             return play(RemoteTable(client, case), case["case_id"], new_agent(), deadline)
         except Exception as e:  # one broken case must not stop the others
             log.exception("%s failed", case["case_id"])
