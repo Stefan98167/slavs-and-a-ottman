@@ -7,6 +7,7 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 - [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal using case and buyer data.
 - [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built from live supplier messages, PDFs, and CSVs.
 - [Package generator](negotiator/packages.py): deterministic selection of up to three valid, buyer-efficient packages; [package policy](negotiator/package_policy.py) derives a conservative price ladder and only adds reciprocal terms when an explicit supplier profile supports them.
+- [Unified agent](arena_kit/agents/unified.py): connects live supplier evidence to buyer-costed package selection; supplier profiles stay unknown until evidence-specific rules exist.
 - [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving CSV parsing, with an option to pass parsed rows into the intelligence component.
 
 ## Supplier-only input policy
