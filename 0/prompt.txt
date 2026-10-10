@@ -103,3 +103,11 @@ What is left to do? Create the visualization and then we will decide who does wh
 ---
 
 The map that you gave me is different then the older one. I want it in the format of the older one
+
+---
+
+Now explain what is left to do. Also say 1-10 how difficult each is so we can distribute the to dos on the team
+
+---
+
+The technical people are Jonas and Stefan and the non are Ahmet and Georgi. Maybe create an md file that is called to do and there explain detailed for each person what everyone has to do. Keep in mind that it all has to be modular so we can merge. Make an TODO.md and push it so other can pull.
