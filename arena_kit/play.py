@@ -154,7 +154,8 @@ def play(table, case_id, agent, deadline=None):
         cap = deadline() if callable(deadline) else deadline
         if cap and time.time() > cap - max(CLOSE_BEFORE_CAP_S, slowest + ROUND_MARGIN_S):
             log.info("%s: the wave's cap is near - closing", case_id)
-            decision = closing_move(case, threads)
+            close = getattr(agent, "close", None)
+            decision = close(case, threads) if callable(close) else closing_move(case, threads)
         else:
             decision = agent.decide(case, threads)
         if (took := time.monotonic() - t0) > MOVE_LIMIT_S * 0.75:

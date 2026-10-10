@@ -49,6 +49,14 @@ def test_both_agents_play_unchanged(arena):
     for case in client.cases("practice")[:n]:
         for agent in (NaiveAgent(), LLMAgent(scripted)):
             result = play(RemoteTable(client), case["case_id"], agent)
+            print(json.dumps({
+                "case_id": case["case_id"],
+                "agent": type(agent).__name__,
+                "outcome": "deal" if result.get("deal") else "no deal",
+                **{key: result.get(key) for key in (
+                    "supplier_id", "terms", "c_open", "c_deal", "c_best", "score"
+                )},
+            }, indent=2))
             assert RESULT <= set(result) and result["ended"]
             assert result["score"] is None or 0 <= result["score"] <= 1
 
