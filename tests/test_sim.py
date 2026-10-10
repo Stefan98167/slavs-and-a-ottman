@@ -76,7 +76,10 @@ def test_documents_follow_the_arena_format(sim):
     case, threads = table.open("case:S03")
     sup, [opening] = next(iter(threads.items()))
     terms = quote_terms(fetch_documents(table, opening)["attachments"][0]["text"])
-    assert terms["stated"] == opening["term_sheets"][0]["terms"]
+    arena_terms = opening["term_sheets"][0]["terms"]
+    assert {field: terms["stated"][field] for field in arena_terms} == arena_terms
+    assert terms["stated"]["currency"] == "EUR"
+    assert terms["stated"]["price_unit"] == "each"
     assert set(terms["standard"]) == set(opening["missing_fields"])
     assert terms["fixed"]["lead_time_days"] == case["fixed_terms"]["lead_time_days"]
     reply = table.send(sup, {"body": "Could you send a cost breakdown? (idx:NOPE@2026-01)", "term_sheets": []})
