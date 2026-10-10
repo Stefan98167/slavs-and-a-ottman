@@ -198,3 +198,7 @@ Jonas also made some changes and got some good scores. We don't want to merge bu
 ---
 
 Do all the changes you wanted to do in the plan proposition. Then run each of the 10 problems so we get a solid average score so we can keep working. Then analyze all the conversations and make a plan what you want to change. Apply the changes you want to do and then pick three random. Remember that reflection is the key. Trial and error. After you have done all of these iterations (13 insgesamt) think about what is going good and what not. Then write a report into a pdf how the whole system works, all of the components explained with also graphical explainations so we can understand the system and decide on further actions.
+
+---
+
+commit and push
