@@ -5,9 +5,9 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 ## Negotiator MVP components
 
 - [MVP evaluator](MVP_EVALUATOR.md): deterministic evaluation of a proposed supplier deal using case and buyer data.
-- [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built from live supplier messages, PDFs, and CSVs.
-- [Package generator](negotiator/packages.py): deterministic selection of up to three valid, buyer-efficient packages; [package policy](negotiator/package_policy.py) derives a conservative price ladder and only adds reciprocal terms when an explicit supplier profile supports them.
-- [Unified agent](arena_kit/agents/unified.py): connects live supplier evidence to buyer-costed package selection; supplier profiles stay unknown until evidence-specific rules exist.
+- [MVP intelligence](MVP_INTELLIGENCE.md): supplier-only normalization and traceable context built from live supplier messages, PDFs, and CSVs, including explicit-statement profile rules.
+- [Package generator](negotiator/packages.py): deterministic selection of up to three valid, buyer-efficient packages; [package policy](negotiator/package_policy.py) derives a conservative price ladder and adds supported cash/capacity give-gets.
+- [Unified agent](arena_kit/agents/unified.py): connects live supplier evidence to buyer-costed package selection and reservation-aware multi-round decisions.
 - [Supplier CSV extraction](arena_kit/quote_extract.py): source-preserving CSV parsing, with an option to pass parsed rows into the intelligence component.
 
 ## Supplier-only input policy
@@ -41,8 +41,9 @@ result = extract_supplier_context(["supplier_quote.csv"], supplier_id="sup:from-
 
 The resulting JSON contains the unchanged extracted `records` plus one or more
 `contexts`. Each context includes normalized evidence, quote history with source
-references, supplier profile fields, and evidence gaps. It does not invent buyer
-targets or supplier traits from quote history.
+references, evidence-backed supplier profile fields, and evidence gaps. Narrow
+explicit-statement rules can mark a profile dimension `likely`; missing, ambiguous,
+or conflicting evidence stays `unknown`. Quote history alone never establishes a trait.
 
 During Arena sessions the runner parses incoming supplier CSV attachments into
 `csv_records` and reads PDFs as text. The supplier agent combines these with each
@@ -66,9 +67,10 @@ not verify that claim. It also cites the supplier's
 highest-priority evidence in its rationale. It accepts offers that meet its target;
 when a supplier makes a final offer or the agent runs out of moves, it accepts the
 best complete standing offer as a last resort rather than walking away and scoring
-zero. It walks away only when no complete offer can be accepted. It does not infer
-buyer budgets or supplier traits that the input does not establish; profile dimensions
-in the current context remain unknown.
+zero. It walks away only when no complete offer can be accepted. This supplier-only
+baseline does not use the buyer-side profile give/get policy; that integration is in
+the selectable `unified` agent. Neither path infers buyer budgets or supplier traits
+that the evidence does not establish.
 
 ```bash
 # Local scripted Arena simulation

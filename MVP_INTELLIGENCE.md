@@ -65,18 +65,24 @@ canonicalizes common supplier CSV headers such as `Unit Price`, `Price`, and
 `Payment Terms` while retaining original keys and unfamiliar fields. If an extracted
 row has no ID, its `Source` line becomes its stable evidence ID.
 
-Quote history is descriptive. It does not establish cash pressure, capacity pressure,
-price rigidity, quality sensitivity, or buyer targets. Profile dimensions therefore
-remain `unknown`. The `SupplierContextAgent` uses the available evidence directly:
-it carries explicit supplier-stated commercial terms into counters, considers a
-historical quote only when currency, price unit, and all available volume and commercial
-terms match, responds to the supplier's latest concession, and cites the highest-priority
-supplier evidence in its message. Supplier-stated index movement times cost share can
-adjust the initial discount by up to the policy's configured `max_claim_adjustment_pct`
-(2 percentage points by default). This is a bounded use of an unverified supplier claim,
-not an independent cost estimate.
-Those steps use observed supplier facts; they do not claim to infer the supplier's
-motives or the buyer's willingness to pay.
+Quote history is descriptive; price patterns alone do not establish cash pressure,
+capacity pressure, price rigidity, quality sensitivity, or buyer targets. The separate
+`build_supplier_profile()` rules mark a dimension `likely` only from narrowly matched,
+explicit supplier statements and retain the source evidence ID, source, excerpt, and
+rule. These deterministic confidence values are rule support, not calibrated
+probabilities. Unsupported, ambiguous, or conflicting statements remain `unknown`.
+
+`SupplierContextAgent` remains a supplier-only baseline: it carries explicit
+supplier-stated commercial terms into counters, considers historical prices only when
+currency, price unit, volume, and material commercial terms match, responds to the
+supplier's latest concession, and cites supplier evidence in its rationale. It does
+not apply buyer-side profile trades. The selectable unified package policy consumes
+the structured profile without reinterpreting its evidence; supported cash or capacity
+profiles can add a bounded reciprocal term, while `quality_sensitive` currently has no
+safe policy mapping and is exposed as unmapped. Unknown profile values keep the
+conservative price-only ladder. Supplier-stated index movement times cost share can
+adjust the opening discount by up to 2 percentage points; this is a bounded use of an
+unverified supplier claim, not an independent cost estimate.
 
 ## Relationship to the deal evaluator
 

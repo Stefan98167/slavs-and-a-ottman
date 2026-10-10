@@ -41,6 +41,7 @@ class PackageAgent:
             case,
             offered_terms,
             self.supplier_profiles.get(sid),
+            supplier_standard_terms=standard_terms(events),
             max_discount_pct=self.max_discount_pct,
         )
         generated = generate_packages(
