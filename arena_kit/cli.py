@@ -27,7 +27,7 @@ def load_env(path=".env"):
 
 
 def agent_factory(name, data):
-    from .agents import LLMAgent, NaiveAgent, llm_from_env
+    from .agents import LLMAgent, NaiveAgent, PackageAgent, llm_from_env
 
     if name == "supplier":
         from negotiator import SupplierContextAgent
@@ -35,6 +35,8 @@ def agent_factory(name, data):
         return SupplierContextAgent
     if name == "naive":
         return NaiveAgent
+    if name == "packages":
+        return PackageAgent
     package = None
     if data:
         from .data import DataPackage
@@ -69,17 +71,17 @@ def main(argv=None):
     c.add_argument("--set", **sets)
     p = sub.add_parser("play", help="play one case")
     p.add_argument("case_id")
-    p.add_argument("--agent", default="supplier", choices=["supplier", "naive", "llm"])
+    p.add_argument("--agent", default="supplier", choices=["supplier", "packages", "naive", "llm"])
     p.add_argument("--data", **data)
     a = sub.add_parser("run", help="play every case of a set in parallel")
     a.add_argument("--set", **sets)
-    a.add_argument("--agent", default="supplier", choices=["supplier", "naive", "llm"])
+    a.add_argument("--agent", default="supplier", choices=["supplier", "packages", "naive", "llm"])
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed")
     s = sub.add_parser("simulate", help="run a negotiation entirely locally, without HTTP or model calls")
     s.add_argument("case_id", nargs="?", default="case:S01")
-    s.add_argument("--agent", choices=["supplier", "naive"], default="supplier")
+    s.add_argument("--agent", choices=["supplier", "packages", "naive"], default="supplier")
     s.add_argument("--out", type=Path, help="Save result and transcript as JSON")
     d = sub.add_parser("data", help="download and unpack the data (package, Sunday release once public)")
     d.add_argument("--out", default="data", help="folder to unpack into")
@@ -108,7 +110,10 @@ def main(argv=None):
             result = play(table, args.case_id, agent)
             session = table.sim.sessions[table.session_id]
             output = {"mode": "simulation",
-                      "input_policy": "supplier_only" if args.agent == "supplier" else "legacy",
+                      "input_policy": (
+                          "supplier_only" if args.agent == "supplier"
+                          else "buyer_cost_packages" if args.agent == "packages" else "legacy"
+                      ),
                       "case_id": args.case_id, "result": result,
                       "threads": {sid: thread["messages"] for sid, thread in session["threads"].items()},
                       "decisions": getattr(agent, "decision_history", [])}
