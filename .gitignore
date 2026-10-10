@@ -9,3 +9,6 @@ data/release-sunday/
 
 .runtime-venv/
 *.log
+
+# Reproducible validation outputs contain supplier transcripts; keep them local.
+/output/validation/

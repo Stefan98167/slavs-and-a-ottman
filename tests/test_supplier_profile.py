@@ -5,7 +5,6 @@ import pytest
 from negotiator.intelligence import build_supplier_context, load_evidence
 from negotiator.supplier_evidence import build_thread_supplier_context, context_for_part
 
-
 POSITIVE = {
     'cash_sensitive': 'We require earlier payment.',
     'capacity_sensitive': 'Our capacity is limited.',
@@ -102,4 +101,34 @@ def test_price_refusals_require_distinct_records_and_fixed_language_does_not():
 def test_profile_is_scoped_to_the_requested_part():
     rows = load_evidence([{'Information': {'supplier_id': 'sup:1', 'part_id': 'part:other',
                                          'notes': POSITIVE['cash_sensitive']}, 'Source': 'supplier.csv:2'}])
-    assert build_supplier_context(rows, 'sup:1', 'part:wanted')['supplier_profile']['cash_sensitive']['state'] == 'unknown'
+    profile = build_supplier_context(rows, 'sup:1', 'part:wanted')['supplier_profile']
+    assert profile['cash_sensitive']['state'] == 'unknown'
+
+
+@pytest.mark.parametrize('dimension,text', [
+    ('cash_sensitive', 'Could you pay our invoices within 10 days? In return we would grant a cash discount.'),
+    ('cash_sensitive', 'Faster payment helps our cash flow; that is reflected in the price.'),
+    ('capacity_sensitive', 'We can confirm additional volumes only against a binding 12-month commitment.'),
+    ('capacity_sensitive', 'We will prioritise customers with firm, long-term commitments.'),
+    ('capacity_sensitive', 'Due to high capacity utilization we cannot confirm your full forecast.'),
+    ('price_rigid', 'Our price list applies to all customers without exception until December 2027.'),
+])
+def test_explicit_commercial_requests_are_recognized_without_inference(dimension, text):
+    assert context(text)['supplier_profile'][dimension]['state'] == 'likely'
+    assert context('If demand rises, ' + text)['supplier_profile'][dimension]['state'] == 'unknown'
+
+
+def test_numeric_quality_commitment_is_carried_in_the_profile_contract():
+    result = context('We guarantee a defect rate below 500 ppm.')['supplier_profile']['quality_sensitive']
+    assert result['supported_terms'] == {'ppm_commitment': 500}
+    generic = context('We guarantee quality.')['supplier_profile']['quality_sensitive']
+    assert 'supported_terms' not in generic
+
+
+def test_text_from_supplier_spreadsheet_keeps_statement_provenance():
+    events = [{'from': 'sales', 'message_id': 'msg:x', 'attachments': [
+        {'attachment_id': 'att:x', 'name': 'terms.xlsx', 'text': 'We require earlier payment.'}
+    ]}]
+    result = context_for_part(build_thread_supplier_context(events, 'sup:1'))
+    evidence = result['supplier_profile']['cash_sensitive']['evidence']
+    assert evidence[0]['source'] == 'att:x (terms.xlsx)'

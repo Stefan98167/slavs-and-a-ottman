@@ -67,3 +67,25 @@ def test_available_alternative_is_compared_and_only_warns_when_worse():
     assert not result["buyer"]["beats_alternative"]
     assert result["valid_for_negotiation"]
     assert any("worse than the available alternative" in warning for warning in result["warnings"])
+
+
+def test_supplier_standard_outside_options_is_valid_and_is_not_silently_snapped():
+    case = load_case("S01.json")
+    result = evaluate_deal(case, {"unit_price": 16.2, "payment_days": 21}, {"payment_days": 21})
+    assert result["valid_for_negotiation"]
+    assert result["final_terms"]["payment_days"] == 21
+    omitted = evaluate_deal(case, {"unit_price": 16.2}, {"payment_days": 21})
+    assert omitted["final_terms"]["payment_days"] == 21
+    invalid = evaluate_deal(case, {"unit_price": 16.2, "payment_days": 22}, {"payment_days": 21})
+    assert not invalid["valid_for_negotiation"]
+    assert 21 not in case["term_options"]["payment_days"]  # Do not mutate shared cases.
+
+
+def test_explicit_no_index_clause_is_preserved_when_it_is_an_allowed_option():
+    case = load_case("S01.json")
+    clause = {"series": "S1", "material_share": 0.5, "deadband_pct": 2, "base_month": "2026-09"}
+    case["negotiable"].append("index_clause")
+    case["term_options"]["index_clause"] = [clause, None]
+    result = evaluate_deal(case, {"unit_price": 16.2, "payment_days": 30, "index_clause": None}, {})
+    assert result["valid_for_negotiation"]
+    assert result["final_terms"]["index_clause"] is None

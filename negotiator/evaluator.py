@@ -17,6 +17,7 @@ from arena_kit.cost import (
     must_haves_ok,
     supplier_value,
     total_cost,
+    with_supplier_options,
 )
 
 
@@ -43,10 +44,12 @@ def evaluate_deal(
     required estimates are present and finite.
     """
     _validate_top_level_inputs(case, proposed_terms, supplier_standard_terms, supplier_economics)
+    case = with_supplier_options(case, supplier_standard_terms)
 
     try:
         warnings = _term_sheet_errors(case, proposed_terms)
-        final_terms = complete_offer(case, proposed_terms)
+        supplied = {field: value for field, value in supplier_standard_terms.items() if field in case["negotiable"]}
+        final_terms = complete_offer(case, {**supplied, **proposed_terms})
     except (KeyError, TypeError, ValueError) as exc:
         raise EvaluationInputError(f"case or proposed_terms cannot be completed: {exc}") from exc
     standard = dict(supplier_standard_terms)

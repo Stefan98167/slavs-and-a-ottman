@@ -12,6 +12,61 @@ Buyer-agent project for the Tacto Negotiation Arena. The repository includes the
 
 ## Practice findings and MVP gate
 
+The latest full-ten benchmark and three random follow-ups are in
+[MVP_FULL_SUITE_REPORT.md](MVP_FULL_SUITE_REPORT.md), with its
+[execution/reflection plan](MVP_FULL_SUITE_PLAN.md). Full-ten mean: **50.30/100**.
+The follow-ups averaged **39.02**, versus **38.44** for the same three earlier cases.
+All 13 deals were valid, but the full benchmark recorded five idle-RFQ timeouts
+and two hidden-relationship-cost discrepancies. The latest changes add bounded
+dialogue recovery, prior quote renewal and authoritative pre-close state refresh;
+they do not solve independent per-thread scheduling or unknown supplier economics.
+The plain-language graphical report is `output/pdf/system-and-13-run-review.pdf`.
+
+The preceding review is in [MVP_ROUND3_REPORT.md](MVP_ROUND3_REPORT.md) with its
+[round-three plan](MVP_ROUND3_PLAN.md). It selectively applies Jonas's
+[core-characteristics reference](MVP_CORE_CHARACTERISTICS.md) without merging:
+one selected proposal, no-giveback checks, whole-package progress, bounded
+response trades and anchored stopping. Supplier motives still require evidence;
+late exploratory trades do not create profile traits. Numerical supplier-claim
+softening now defaults to zero and remains explicitly configurable up to two
+percentage points. Arena's hidden relationship cost may differ from our model;
+completed runs report that difference rather than infer supplier economics.
+
+The prior review is in [MVP_ROUND2_REPORT.md](MVP_ROUND2_REPORT.md)
+with its [round-two plan](MVP_ROUND2_PLAN.md). It covers grader-compatible evidence,
+bounded response trades and current structured supplier alternatives. All nine
+hosted deals were valid, but overall score improvement is not demonstrated.
+The previous round is in [MVP_ITERATION_REPORT.md](MVP_ITERATION_REPORT.md)
+with its [iteration plan](MVP_ITERATION_PLAN.md). The earlier implementation and
+validation are documented in [MVP_VALIDATION_REPORT.md](MVP_VALIDATION_REPORT.md); the execution checklist is in
+[MVP_COMPLETION_PLAN.md](MVP_COMPLETION_PLAN.md). The current unified path supports
+supplier-authored archive documents, sourced cash/capacity/quality trades,
+distinct package choices, and concurrent supplier requests within an RFQ. The
+quality trade requires a concrete supplier ppm guarantee; a generic quality
+statement cannot authorize an invented target.
+
+```bash
+# Include relevant supplier-authored letters from the package and Sunday release.
+.venv/bin/python -m arena_kit.cli play case:P01 --agent unified --data data
+
+# Repeatable local comparison; choose a fresh output directory for each run.
+.venv/bin/python -m scripts.validate_mvp --mode local --out output/validation/local-new
+
+# Consumes exactly three practice sessions, randomly selected before any session opens.
+.venv/bin/python -m scripts.validate_mvp --mode hosted --out output/validation/hosted-new
+
+# Consumes exactly ten sessions, one per hosted practice case, without replacements.
+.venv/bin/python -m scripts.validate_mvp --mode hosted --selection all --out output/validation/full-new
+
+# Start before the final begins; this waits for its five waves.
+.venv/bin/python -m arena_kit.cli run --set final --agent unified --data data --parallel 10
+```
+
+Validation stores the selection seed, source fingerprint, actual transcripts,
+decisions, scores, replay links and contract audits under the ignored
+`output/validation/` directory. These files contain no copied environment keys.
+The default agent remains `supplier`; select `unified` explicitly.
+
 [Ahmet's replay findings](brief/replay-findings-tuning.md) cover hosted P10, P01, and P08
 negotiations. The `unified` agent uses those lessons to avoid repeating a refused cost-breakdown
 request and to seek clarification when a supplier explicitly rejects the lead time in its own
@@ -32,6 +87,11 @@ identities supplied by the caller from the live thread. Known bundled `data/data
 CSV sources are rejected. A filename cannot establish provenance; callers must
 supply genuine supplier data. The deal evaluator remains a separate MVP that reads
 case and buyer data; it is not used by supplier evidence extraction.
+
+Unified optionally uses a separate archive adapter through `--data`. That adapter
+accepts only dated supplier-authored emails/letters whose supplier and part scope
+match the case. It rejects buyer-authored meeting notes, unrelated suppliers and
+future documents. This does not relax the supplier CSV parser's input policy.
 
 ## Run locally (offline)
 

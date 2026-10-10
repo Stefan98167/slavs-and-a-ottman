@@ -15,7 +15,7 @@ import logging
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .client import ArenaError
 from .cost import must_haves_ok, total_cost
@@ -73,6 +73,32 @@ class RemoteTable:
     def attachment(self, attachment_id):
         return self.client.attachment(self.session_id, attachment_id)
 
+    def refresh_threads(self, previous):
+        """Authoritative pre-close snapshot, including separately returned timeouts.
+
+        Idle RFQ threads can change while another supplier negotiates. GET does
+        not extend their deadlines: this prevents stale acceptance, not timeouts.
+        """
+        state = self.client.session(self.session_id)
+        if state.get("status") == "ended":
+            self.done = state.get("result") or self.result()
+            return {}
+        parsed = {(sid, att.get("attachment_id")): att for sid, events in previous.items()
+                  for event in events for att in event.get("attachments", []) if att.get("attachment_id")}
+        refreshed = {}
+        for sid in state["threads"]:
+            thread = self.client.thread(self.session_id, sid)
+            events = current_thread_events(thread)
+            for event in events:
+                for att in event.get("attachments", []):
+                    old = parsed.get((sid, att.get("attachment_id")), {})
+                    for key in ("text", "pdf_parse_error", "csv_records", "supplier_context", "csv_parse_error"):
+                        if key in old:
+                            att[key] = old[key]
+                fetch_documents(self, event, sid)
+            refreshed[sid] = events
+        return refreshed
+
     def missed(self, supplier_id, error):
         """After a 409: the result if the case has ended (e.g. at a wave's cap), else what the
         thread now says (a timeout answer, or the reason it ended)."""
@@ -115,6 +141,24 @@ def live_threads(threads):
 def moves_left(case, events):
     """Messages you may still send in this thread (the round limit counts each of them)."""
     return case.get("round_limit", 10) - sum(m.get("from") == "buyer" for m in events)
+
+
+def current_thread_events(thread):
+    """Reconcile /thread's authoritative status/ID with its message history."""
+    events = list(thread.get("messages") or [])
+    current_id, status = thread.get("offer_id"), thread.get("status")
+    if events and standing(events)[0] == current_id and latest(events).get("status") == status:
+        return events
+    timeout = next((item for item in reversed(thread.get("timeouts") or [])
+                    if item.get("offer_id") == current_id), {})
+    # Never attach old terms to a new ID when the server gave no matching terms.
+    sheets = [{"term_sheet_id": current_id, "terms": timeout["terms"]}] if (
+        current_id and timeout.get("terms") and status not in ENDED) else []
+    events.append({"from": "arena", "message_id": f"snapshot:{current_id or status}",
+                   "status": status, "term_sheets": sheets,
+                   "body": timeout.get("text", "Remote standing state changed; full terms unavailable."),
+                   "attachments": [], "missing_fields": timeout.get("missing_fields", [])})
+    return events
 
 
 class _NamedBytesIO(io.BytesIO):
@@ -197,6 +241,28 @@ def closing_move(case, threads):
     return {"supplier_id": best[1], "message": {"action": {"type": "accept", "term_sheet_id": best[2]}}}
 
 
+def _send_batch(table, decisions):
+    """Service independent supplier threads concurrently; never send a close in a batch."""
+    suppliers = [item["supplier_id"] for item in decisions]
+    if len(suppliers) != len(set(suppliers)) or any(item["message"].get("action") for item in decisions):
+        raise ValueError("a supplier batch must contain one non-closing message per supplier")
+
+    def send(item):
+        sid, message = item["supplier_id"], item["message"]
+        try:
+            reply = table.send(sid, message)
+        except ArenaError as exc:
+            if exc.status != 409:
+                raise
+            reply = table.missed(sid, exc)
+        return sid, message, reply if "result" in reply else fetch_documents(table, reply, sid)
+
+    with ThreadPoolExecutor(max_workers=len(decisions)) as pool:
+        pending = [pool.submit(send, item) for item in decisions]
+        for future in as_completed(pending):
+            yield future.result()
+
+
 def play(table, case_id, agent, deadline=None):
     """Play one case to its end. `deadline` (time.time(), or a function returning it): a Live Final
     wave's cap - shortly before it, `closing_move` closes the case so it does not end without a deal."""
@@ -215,12 +281,35 @@ def play(table, case_id, agent, deadline=None):
             close = getattr(agent, "close", None)
             decision = close(case, threads) if callable(close) else closing_move(case, threads)
         else:
-            decision = agent.decide(case, threads)
+            batch = getattr(agent, "decide_batch", None)
+            decisions = batch(case, threads) if callable(batch) else [agent.decide(case, threads)]
+            if len(decisions) > 1:
+                ended_result = None
+                for sid, msg, reply in _send_batch(table, decisions):
+                    if "result" in reply:
+                        ended_result = reply["result"]
+                    else:
+                        threads[sid] += [{**msg, "from": "buyer"}, reply]
+                if ended_result is not None:
+                    return ended_result
+                slowest = max(slowest, time.monotonic() - t0)
+                continue
+            decision = decisions[0]
         if (took := time.monotonic() - t0) > MOVE_LIMIT_S * 0.75:
             log.warning("decision took %.1fs - the limit is %ss per message", took, MOVE_LIMIT_S)
         sid, msg = decision["supplier_id"], decision["message"]
         try:
             if msg.get("action"):
+                refresh = getattr(table, "refresh_threads", None)
+                reconsider = getattr(agent, "reconsider_close", None)
+                if callable(refresh) and callable(reconsider):
+                    threads = refresh(threads)
+                    if getattr(table, "done", None):
+                        return table.done
+                    if not live_threads(threads):
+                        return table.result()
+                    decision = reconsider(case, threads)
+                    sid, msg = decision["supplier_id"], decision["message"]
                 log.info("%s %s", sid, msg["action"])
                 return table.close(sid, msg)
             reply = table.send(sid, msg)

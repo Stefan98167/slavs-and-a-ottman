@@ -14,7 +14,7 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from arena_kit.cost import complete_offer
+from arena_kit.cost import complete_offer, with_supplier_options
 
 from .evaluator import evaluate_deal
 
@@ -59,6 +59,7 @@ def generate_packages(
         require_beats_alternative,
     )
     prices = _unique_prices(candidate_unit_prices)
+    case = with_supplier_options(case, supplier_standard_terms or {})
     constraints = _normalize_constraints(case, prices, term_constraints_by_price)
     standard = dict(supplier_standard_terms or {})
     base_terms = {**standard, **supplier_offer_terms}
