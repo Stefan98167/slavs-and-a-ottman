@@ -46,7 +46,7 @@ class UnifiedAgent:
     deliberately produce price-only packages rather than invented give-gets.
     """
 
-    def __init__(self, *, max_discount_pct=5.0, package=None, min_improvement_pct=0.1,
+    def __init__(self, *, max_discount_pct=15.0, package=None, min_improvement_pct=0.1,
                  claim_adjustment_cap_pct=0.0, minimum_rounds=2):
         for name, value, ceiling in (("max_discount_pct", max_discount_pct, 100),
                                      ("min_improvement_pct", min_improvement_pct, 100),
@@ -56,9 +56,38 @@ class UnifiedAgent:
         if type(minimum_rounds) is not int or minimum_rounds < 0:
             raise ValueError("minimum_rounds must be a non-negative integer")
         self.max_discount_pct = max_discount_pct
+        # A deliberately more ambitious opening anchor for controlled tests.
+        # Keep it opt-in; reservation and must-have filters still decide which
+        # generated packages are eligible to send.
+        self.bolder_opening_enabled = os.environ.get("UNIFIED_BOLDER_OPENING") == "1"
+        self.adaptive_opening_enabled = os.environ.get("UNIFIED_ADAPTIVE_OPENING") == "1"
+        self.adaptive_opening_v2_enabled = os.environ.get("UNIFIED_ADAPTIVE_OPENING_V2") == "1"
+        override_raw = os.environ.get("UNIFIED_OPENING_DISCOUNT_PCT")
+        self.opening_discount_override_enabled = override_raw is not None
+        self.opening_discount_override_pct = None
+        if override_raw is not None:
+            try:
+                self.opening_discount_override_pct = float(override_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("UNIFIED_OPENING_DISCOUNT_PCT must be a finite number in [0, 100)") from exc
+            valid_override = finite_number(self.opening_discount_override_pct)
+            if not valid_override or not 0 <= self.opening_discount_override_pct < 100:
+                raise ValueError("UNIFIED_OPENING_DISCOUNT_PCT must be a finite number in [0, 100)")
+        modes = (self.bolder_opening_enabled, self.adaptive_opening_enabled,
+                 self.adaptive_opening_v2_enabled, self.opening_discount_override_enabled)
+        if sum(modes) > 1:
+            raise ValueError("opening discount experiments are mutually exclusive")
+        bonus = min(5.0, max(0.0, 99.999 - max_discount_pct)) if self.bolder_opening_enabled else 0.0
+        if self.opening_discount_override_enabled:
+            self.effective_max_discount_pct = self.opening_discount_override_pct
+        else:
+            self.effective_max_discount_pct = max_discount_pct + bonus
         self.min_improvement_pct = min_improvement_pct
         self.claim_adjustment_cap_pct = claim_adjustment_cap_pct
-        self.minimum_rounds = minimum_rounds
+        self.riskier_mode_enabled = os.environ.get("UNIFIED_RISKIER") == "1"
+        # In experimental mode, take one additional safe counter before using
+        # the ordinary goal/negligible-improvement acceptance shortcuts.
+        self.minimum_rounds = minimum_rounds + int(self.riskier_mode_enabled)
         self.opening_goals = {}
         self.decision_history = []
         self.package = package
@@ -69,6 +98,8 @@ class UnifiedAgent:
         self.evidence_warnings = []
         self.supplier_economics_enabled = os.environ.get("SUPPLIER_ECONOMICS") == "1"
         self.supplier_facts = self._load_supplier_facts() if self.supplier_economics_enabled else {}
+        self.response_trade_menu_enabled = os.environ.get("UNIFIED_RESPONSE_TRADE_MENU") == "1"
+        self.proactive_price_evidence_enabled = os.environ.get("UNIFIED_PROACTIVE_PRICE_EVIDENCE") == "1"
 
     @staticmethod
     def _load_supplier_facts():
@@ -86,6 +117,69 @@ class UnifiedAgent:
         inline_facts = case.get("facts")
         facts = {**self.supplier_facts, **(inline_facts if isinstance(inline_facts, Mapping) else {})}
         return estimate_supplier_economics(case, supplier_id, facts)
+
+    def _opening_discount_for_events(self, events):
+        """Adapt the ask to observed supplier price movement, not inferred traits."""
+        if not self.adaptive_opening_enabled and not self.adaptive_opening_v2_enabled:
+            return self.effective_max_discount_pct, None
+
+        initial = min(99.999, self.max_discount_pct)
+        cooperative = max(0.0, initial - 7.0)
+        firm = min(99.999, self.max_discount_pct + 5.0)
+        quotes = []
+        for index, event in enumerate(events):
+            if event.get("from") in {"buyer", "arena"}:
+                continue
+            sheets = event.get("term_sheets") or []
+            if not sheets or not isinstance(sheets[0], Mapping):
+                continue
+            terms = sheets[0].get("terms")
+            price = terms.get("unit_price") if isinstance(terms, Mapping) else None
+            if finite_number(price) and price > 0:
+                quotes.append((index, price))
+        if len(quotes) < 2:
+            return initial, {"response": "initial_or_unobserved", "supplier_price_move_pct": None,
+                             "reciprocal_concession_share": 0.5}
+
+        (previous_index, previous), (current_index, current) = quotes[-2:]
+        if not any(event.get("from") == "buyer" for event in events[previous_index + 1:current_index]):
+            return initial, {"response": "no_buyer_move_between_quotes", "supplier_price_move_pct": None,
+                             "reciprocal_concession_share": 0.5}
+        movement_pct = (current - previous) / previous * 100
+        if self.adaptive_opening_v2_enabled:
+            if movement_pct <= -2.0:
+                return initial, {
+                    "response": "supplier_conceded_strongly",
+                    "supplier_price_move_pct": round(movement_pct, 2),
+                    "discount_threshold_pct": 2.0,
+                    "reciprocal_concession_share": 0.25,
+                }
+            if movement_pct <= -1.0:
+                return initial, {
+                    "response": "supplier_conceded_modestly",
+                    "supplier_price_move_pct": round(movement_pct, 2),
+                    "discount_threshold_pct": 1.0,
+                    "reciprocal_concession_share": 0.5,
+                }
+            return firm, {
+                "response": "supplier_held_or_raised_price",
+                "supplier_price_move_pct": round(movement_pct, 2),
+                "discount_threshold_pct": 1.0,
+                "reciprocal_concession_share": 0.0,
+            }
+        if movement_pct <= -1.0:
+            return cooperative, {
+                "response": "supplier_conceded_price",
+                "supplier_price_move_pct": round(movement_pct, 2),
+                "discount_threshold_pct": 1.0,
+                "reciprocal_concession_share": 0.8,
+            }
+        return firm, {
+            "response": "supplier_held_or_raised_price",
+            "supplier_price_move_pct": round(movement_pct, 2),
+            "discount_threshold_pct": 1.0,
+            "reciprocal_concession_share": 0.0,
+        }
 
     def _load_archive(self):
         from ..data import DataPackage
@@ -225,10 +319,11 @@ class UnifiedAgent:
             context = self._context(prefix, supplier_id, parts[0] if len(parts) == 1 else None)
             impact, _ = _supplier_claim_cost_impact(context)
             economics = opening.get("supplier_economics")
+            opening_discount, _ = self._opening_discount_for_events(prefix)
             try:
                 plan = plan_packages(case, opening["terms"], (context or {}).get("supplier_profile", {}),
                                      supplier_standard_terms=opening["standard"],
-                                     max_discount_pct=self.max_discount_pct,
+                                     max_discount_pct=opening_discount,
                                      claimed_cost_impact_pct=max(-self.claim_adjustment_cap_pct,
                                                                  min(self.claim_adjustment_cap_pct, impact)))
                 generated = generate_packages(case, opening["terms"], plan["candidate_unit_prices"],
@@ -347,6 +442,7 @@ class UnifiedAgent:
         claimed_impact, supplier_claims = (
             _supplier_claim_cost_impact(context) if buyer_rounds == 0 else (0.0, [])
         )
+        opening_discount, adaptive_response = self._opening_discount_for_events(events)
         try:
             plan = plan_packages(
                 case,
@@ -355,11 +451,18 @@ class UnifiedAgent:
                 supplier_standard_terms=offer["standard"],
                 claimed_cost_impact_pct=max(-self.claim_adjustment_cap_pct,
                                             min(self.claim_adjustment_cap_pct, claimed_impact)),
-                max_discount_pct=self.max_discount_pct,
+                max_discount_pct=opening_discount,
             )
+            plan["effective_max_discount_pct"] = opening_discount
+            if adaptive_response is not None:
+                plan["adaptive_supplier_response"] = adaptive_response
             previous_sheets = _last_buyer_sheets(events)
             if previous_sheets:
-                _advance_price_ladder(case, plan, events, offer, previous_sheets)
+                reciprocal_share = (adaptive_response or {}).get("reciprocal_concession_share", 0.5)
+                _advance_price_ladder(
+                    case, plan, events, offer, previous_sheets,
+                    reciprocal_concession_share=reciprocal_share,
+                )
                 recheck_buyer_terms(case, plan, offer["terms"], offer["standard"])
             if not plan["candidate_unit_prices"]:
                 repairs = restoration_packages(
@@ -429,12 +532,15 @@ class UnifiedAgent:
             return None
         considered = deepcopy(packages)
         packages, excluded = select_proposal(
-            case, offer, packages, events, ceiling, offer.get("supplier_economics")
+            case, offer, packages, events, ceiling, offer.get("supplier_economics"),
+            max_packages=(3 if self.response_trade_menu_enabled and plan.get("response_trade") else 1),
         )
         if not packages:
             return None
         plan["selection_audit"] = {"considered": considered, "excluded": excluded,
-                                   "selected_terms": deepcopy(packages[0]["terms"])}
+                                   "selected_terms": deepcopy(packages[0]["terms"]),
+                                   "selected_terms_list": [deepcopy(p["terms"]) for p in packages],
+                                   "response_trade_menu_enabled": self.response_trade_menu_enabled}
         citable_ids = set(case.get("refs") or []) | set((case.get("facts") or {}).keys())
         citable_ids.update(record["Information"]["id"]
                            for record in self.archive_records.get(offer["supplier_id"], []))
@@ -449,7 +555,11 @@ class UnifiedAgent:
         })[:20]
         plan["supplier_claims_used"] = supplier_claims
         plan["profile_refs"] = profile_refs
-        plan["price_evidence_reply"] = price_evidence_reply(case, offer["supplier_id"], events, self.package)
+        plan["price_evidence_reply"] = price_evidence_reply(
+            case, offer["supplier_id"], events, self.package,
+            proactive=(self.proactive_price_evidence_enabled
+                       and not any(event.get("from") == "buyer" for event in events)),
+        )
         plan["source_document_reply"] = source_document_reply(
             events, self.archive_records.get(offer["supplier_id"], [])
         )
@@ -495,6 +605,12 @@ class UnifiedAgent:
             "evidence_source": _lead_source(candidate["context"]),
             "supplier_claimed_cost_impact_pct": candidate["plan"]["claim_adjustment_pct"],
             "claim_adjustment_cap_pct": self.claim_adjustment_cap_pct,
+            "effective_max_discount_pct": candidate["plan"].get("effective_max_discount_pct",
+                                                                 self.effective_max_discount_pct),
+            "bolder_opening_enabled": self.bolder_opening_enabled,
+            "adaptive_opening_enabled": self.adaptive_opening_enabled,
+            "adaptive_opening_v2_enabled": self.adaptive_opening_v2_enabled,
+            "adaptive_supplier_response": candidate["plan"].get("adaptive_supplier_response"),
             "supplier_claims_cited": candidate["plan"]["supplier_claims_used"],
             "trade_hypotheses": candidate["plan"]["trade_hypotheses"],
             "term_restoration": candidate["plan"].get("term_restoration", False),
@@ -508,6 +624,7 @@ class UnifiedAgent:
             "response_signal": packages[0].get("response_signal"),
             "opening_goal": offer.get("opening_goal"),
             "minimum_rounds": self.minimum_rounds,
+            "riskier_mode_enabled": self.riskier_mode_enabled,
             "message": message,
         })
         return {"supplier_id": offer["supplier_id"], "message": message}
@@ -527,6 +644,8 @@ class UnifiedAgent:
             "standing_total_cost": offer["standing_cost"],
             "reservation_cost": offer.get("reservation_cost"),
             "remaining_moves": offer.get("remaining_moves"),
+            "minimum_rounds": self.minimum_rounds,
+            "riskier_mode_enabled": self.riskier_mode_enabled,
             "supplier_status": offer.get("status"),
             "supplier_claim_results": offer.get("claim_results", []),
             "message": message,
@@ -849,7 +968,7 @@ def _terms_key(terms):
     return json.dumps(terms or {}, sort_keys=True, default=str, separators=(",", ":"))
 
 
-def _advance_price_ladder(case, plan, events, offer, previous_sheets):
+def _advance_price_ladder(case, plan, events, offer, previous_sheets, *, reciprocal_concession_share=0.5):
     """Share bounded whole-package progress; do not reward a worse valid deal.
 
     Discounts from each new standing price would make a fresh 5/3/1% ladder
@@ -901,7 +1020,9 @@ def _advance_price_ladder(case, plan, events, offer, previous_sheets):
         if previous >= current - 0.005:
             continue  # The standing sheet already beats this prior ask.
         gap_share = max(0, (current - previous) / 2)
-        credit = gap_share if repaired else min(concession, gap_share)
+        credit = gap_share if repaired else min(
+            concession * reciprocal_concession_share / 0.5, gap_share
+        )
         price = round(min(previous + credit, current - 0.01), 2)
         if price in constraints:
             continue

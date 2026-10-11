@@ -27,8 +27,15 @@ def reservation_cost(case, evaluation):
     return round(bound, 2) if math.isfinite(bound) else 0.0
 
 
-def select_proposal(case, offer, packages, events, ceiling=None, supplier_economics=None):
-    """Select one new package; never give back an available safe deal's value."""
+def select_proposal(case, offer, packages, events, ceiling=None, supplier_economics=None,
+                    max_packages=1):
+    """Select safe new packages; never give back an available safe deal's value.
+
+    The default remains a single proposal. A caller may explicitly request a
+    small menu of up to three alternatives for controlled experiments.
+    """
+    if type(max_packages) is not int or not 1 <= max_packages <= 3:
+        raise ValueError("max_packages must be an integer from 1 to 3")
     seen = {json.dumps(sheet.get("terms"), sort_keys=True) for event in events
             if event.get("from") == "buyer" for sheet in event.get("term_sheets", [])}
     limit = offer["reservation_cost"]
@@ -54,4 +61,4 @@ def select_proposal(case, offer, packages, events, ceiling=None, supplier_econom
         else:
             retained.append({**package, "evaluation": check})
     retained.sort(key=lambda item: item["evaluation"]["buyer"]["total_cost"])
-    return retained[:1], excluded
+    return retained[:max_packages], excluded

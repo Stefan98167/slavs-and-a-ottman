@@ -47,6 +47,10 @@ statement cannot authorize an invented target.
 
 ## Run the final
 
+The unified agent's standard opening discount is 15%, with buyer must-haves and reservation-cost
+checks still applied to every package. The 20% and adaptive opening experiments are opt-in and
+remain off by default.
+
 Set `ARENA_URL` and `ARENA_API_KEY` in `.env` (names only; never commit the file), then install the
 locked dependencies with `uv sync`. After the organizers publish the Sunday data at 08:00, run
 `uv run arena data` to unpack it under `data/`. Unified reads that archive when explicitly started
@@ -62,7 +66,9 @@ default: `--rfq-keepalive` holds qualifying idle RFQ threads, `SUPPLIER_ECONOMIC
 fact-based supplier relationship cost, and `SUPPLIER_ARCHIVE_EVIDENCE=1` loads archived
 release letters/news without passing `--data`. Fact-based relationship costs are not calibrated
 closely to saved P02/P03 Arena costs, so leave that flag off for the Live Final unless the team
-validates the cost-fact semantics first.
+validates the cost-fact semantics first. `UNIFIED_PROACTIVE_PRICE_EVIDENCE=1` cites qualifying
+same-part price history in the first counter; it is off by default, and the local scripted suppliers
+do not test whether this argument changes a real supplier's response.
 
 Approach: prepare each case from its permitted data, read the supplier's current offer and
 evidence, compare complete packages against buyer requirements and reservation cost, then accept

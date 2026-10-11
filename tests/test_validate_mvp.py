@@ -1,6 +1,8 @@
 import math
 
-from scripts.validate_mvp import order_records, summarize_records
+import pytest
+
+from scripts.validate_mvp import order_records, select_cases, summarize_records
 
 
 def test_batch_summary_reports_mean_and_safety_counts():
@@ -43,3 +45,31 @@ def test_saved_records_have_stable_order_after_parallel_runs():
         {"case_id": "case:P01", "agent": "unified"},
         {"case_id": "case:P02", "agent": "unified"},
     ]
+
+
+def test_case_selection_can_target_exactly_one_eligible_hosted_case():
+    cases = [
+        {"case_id": "case:P18", "hosted": True},
+        {"case_id": "case:P17", "hosted": True},
+        {"case_id": "case:S01", "hosted": False},
+    ]
+    eligible, selected = select_cases(cases, seed=1, case_id="case:P18")
+    assert [case["case_id"] for case in eligible] == ["case:P17", "case:P18"]
+    assert [case["case_id"] for case in selected] == ["case:P18"]
+
+    with pytest.raises(ValueError, match="not an eligible hosted case"):
+        select_cases(cases, seed=1, case_id="case:S01")
+
+
+def test_random_case_count_is_exact_and_without_replacement():
+    cases = [{"case_id": f"case:P{i:02d}", "hosted": True} for i in range(10)]
+    _, selected = select_cases(cases, seed=17, count=2)
+    assert len(selected) == 2
+    assert len({case["case_id"] for case in selected}) == 2
+
+
+@pytest.mark.parametrize("count", [0, -1, 11, True, 1.5])
+def test_random_case_count_rejects_invalid_values(count):
+    cases = [{"case_id": f"case:P{i:02d}", "hosted": True} for i in range(10)]
+    with pytest.raises(ValueError, match="random selection count"):
+        select_cases(cases, seed=17, count=count)

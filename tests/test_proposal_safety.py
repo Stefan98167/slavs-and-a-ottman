@@ -22,6 +22,30 @@ def test_select_one_without_giving_back_safe_offer_value(price):
     assert excluded
 
 
+def test_select_response_trade_menu_is_explicitly_bounded_and_keeps_all_safety_checks():
+    case = deepcopy(CASE)
+    events = [supplier("open", 42)]
+    offer = UnifiedAgent()._standing_offers(case, {"sup:A": events})[0]
+    packages = [{"terms": {"unit_price": 39 + i / 10, "payment_days": 30}} for i in range(3)]
+
+    default, _ = select_proposal(case, offer, packages, events)
+    menu, _ = select_proposal(case, offer, packages, events, max_packages=3)
+
+    assert len(default) == 1
+    assert len(menu) == 3
+    assert [item["evaluation"]["buyer"]["total_cost"] for item in menu] == sorted(
+        item["evaluation"]["buyer"]["total_cost"] for item in menu
+    )
+    assert all(item["evaluation"]["buyer"]["total_cost"] <= offer["standing_cost"] for item in menu)
+    assert all(set(item["terms"]) == set(case["negotiable"]) for item in menu)
+
+
+@pytest.mark.parametrize("value", [0, -1, 4, True, 1.5])
+def test_select_proposal_rejects_unbounded_or_malformed_menu_size(value):
+    with pytest.raises(ValueError, match="max_packages"):
+        select_proposal(CASE, {}, [], [], max_packages=value)
+
+
 def test_previously_sent_package_is_excluded_even_after_another_counter():
     terms = {"unit_price": 39, "payment_days": 30}
     events = [supplier("open", 42), {"from": "buyer", "term_sheets": [{"terms": terms}]},
@@ -59,7 +83,7 @@ def test_claims_are_cited_but_do_not_change_default_opening_price():
     agent = UnifiedAgent()
     message = supplier("open", 42, body="S1 rose 50 % in twelve months and is 80 % of our cost.")
     out = agent.decide(CASE, {"sup:A": [message]})
-    assert out["message"]["term_sheets"][0]["terms"]["unit_price"] == 39.9
+    assert out["message"]["term_sheets"][0]["terms"]["unit_price"] == 35.7
     assert "not independently verified" in out["message"]["body"]
     assert agent.decision_history[-1]["supplier_claimed_cost_impact_pct"] == 0
 

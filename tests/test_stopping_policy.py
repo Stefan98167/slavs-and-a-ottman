@@ -52,6 +52,42 @@ def test_final_offer_and_deadline_are_not_blocked_by_minimum_rounds():
         assert agent.decide(case, {"sup:A": events})["message"]["action"]["type"] == "accept"
 
 
+def test_riskier_flag_takes_one_more_safe_counter_before_threshold_accept(monkeypatch):
+    events = [
+        supplier("open", 42),
+        {"from": "buyer", "term_sheets": [{"terms": {"unit_price": 41, "payment_days": 30}}]},
+        supplier("open", 40),
+        {"from": "buyer", "term_sheets": [{"terms": {"unit_price": 39.9, "payment_days": 30}}]},
+        supplier("open", 40),
+    ]
+
+    def prepared_agent():
+        agent = UnifiedAgent()
+        agent._opening_goal = lambda *args: None
+        agent._package_candidate = lambda case, threads, offer, *, ceiling=None: {
+            "offer": offer,
+            "plan": {"supplier_alternative": False, "offer_restoration": False},
+            "best_cost": offer["standing_cost"],
+        }
+        agent._counter = lambda candidate, case: {
+            "supplier_id": candidate["offer"]["supplier_id"], "message": {"body": "another safe counter"}
+        }
+        return agent
+
+    monkeypatch.delenv("UNIFIED_RISKIER", raising=False)
+    ordinary = prepared_agent()
+    ordinary_out = ordinary.decide(CASE, {"sup:A": deepcopy(events)})
+    assert ordinary_out["message"]["action"]["type"] == "accept"
+    assert ordinary.decision_history[-1]["riskier_mode_enabled"] is False
+
+    monkeypatch.setenv("UNIFIED_RISKIER", "1")
+    riskier = prepared_agent()
+    riskier_out = riskier.decide(CASE, {"sup:A": deepcopy(events)})
+    assert riskier_out["message"]["body"] == "another safe counter"
+    assert riskier.riskier_mode_enabled is True
+    assert riskier.minimum_rounds == 3
+
+
 def test_goal_does_not_discard_a_cheaper_concrete_supplier_alternative():
     current = supplier("open", 39.8)
     current["term_sheets"].append({"term_sheet_id": "offer:alternative",
@@ -85,7 +121,7 @@ def test_direct_request_receives_honest_evidence_response_without_invented_bench
 
 def test_secondary_rfq_counter_cannot_exceed_existing_safe_competitor():
     agent = UnifiedAgent()
-    result = agent.decide_batch(CASE, {"sup:A": [supplier("open", 40)], "sup:B": [supplier("open", 43)]})
+    result = agent.decide_batch(CASE, {"sup:A": [supplier("open", 40)], "sup:B": [supplier("open", 55)]})
     assert [item["supplier_id"] for item in result] == ["sup:A"]
     assert len(agent.decision_history) == 1
 

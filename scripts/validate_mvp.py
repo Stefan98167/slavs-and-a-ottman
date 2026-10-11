@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,8 +19,9 @@ from pathlib import Path
 from arena_kit.cli import agent_factory, load_env
 from arena_kit.client import ArenaClient
 from arena_kit.cost import must_haves_ok
+from arena_kit.data import DataPackage
 from arena_kit.play import RemoteTable, hosted, play
-from arena_kit.sim import SimTable
+from arena_kit.sim import Sim, SimTable, load_cases
 from negotiator.evaluator import evaluate_deal
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,27 +107,33 @@ def reconcile_cost(result, decisions):
             "note": "Server cost is authoritative; missing supplier economics are not inferred."}
 
 
-def select_cases(cases, seed, selection="random"):
+def select_cases(cases, seed, selection="random", case_id=None, count=3):
     eligible = sorted(hosted(cases), key=lambda case: case["case_id"])
     if len({case["case_id"] for case in eligible}) != len(eligible):
         raise ValueError("duplicate eligible case IDs")
+    if case_id is not None:
+        selected = [case for case in eligible if case["case_id"] == case_id]
+        if len(selected) != 1:
+            raise ValueError(f"requested case is not an eligible hosted case: {case_id}")
+        return eligible, selected
     if selection == "all":
         if len(eligible) != 10:
             raise ValueError("full-suite benchmark requires exactly ten eligible hosted cases")
         return eligible, list(eligible)
     if selection != "random":
         raise ValueError("unknown selection mode")
-    if len(eligible) < 3:
-        raise ValueError("fewer than three eligible hosted cases")
-    return eligible, random.Random(seed).sample(eligible, 3)
+    if type(count) is not int or not 1 <= count <= len(eligible):
+        raise ValueError("random selection count must be between one and the eligible case count")
+    return eligible, random.Random(seed).sample(eligible, count)
 
 
-def local_runs(factory, out):
+def local_runs(factory, out, data_root="data"):
     records = []
+    facts = DataPackage(data_root).facts
     for name in ("unified", "supplier", "packages", "advanced"):
         for case_id in ("case:S01", "case:S02", "case:S03"):
             agent = factory() if name == "unified" else agent_factory(name, None)()
-            table = SimTable()
+            table = SimTable(Sim(load_cases(), facts=facts, no_clock=True))
             result = play(table, case_id, agent)
             session = table.sim.sessions[table.session_id]
             decisions = getattr(agent, "decision_history", [])
@@ -192,29 +200,54 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--selection", choices=("random", "all"), default="random")
+    parser.add_argument("--count", type=int, default=3,
+                        help="number of random hosted cases to select (default: 3)")
+    parser.add_argument("--case-id", help="run exactly this eligible hosted case (for controlled tests)")
     args = parser.parse_args()
+    if args.case_id and args.mode != "hosted":
+        parser.error("--case-id is only available in hosted mode")
+    if args.selection == "all" and args.count != 3:
+        parser.error("--count applies only to random selection")
+    if args.case_id and args.count != 3:
+        parser.error("--count cannot be combined with --case-id")
     args.out.mkdir(parents=True, exist_ok=True)
     if (args.out / "run.json").exists():
         raise ValueError("output already contains a run; choose a new directory to preserve evidence")
     manifest = {"mode": args.mode, "started_at": datetime.now(UTC).isoformat(), **source_version()}
     factory = agent_factory("unified", args.data)
     if args.mode == "local":
-        records = local_runs(factory, args.out)
+        records = local_runs(factory, args.out, args.data)
     else:
         load_env()
         client = ArenaClient()
         quota = client.me().get("practice", {})
         seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2**32)
-        eligible, selected = select_cases(client.cases("practice"), seed, args.selection)
+        eligible, selected = select_cases(client.cases("practice"), seed, args.selection,
+                                           args.case_id, args.count)
         if quota.get("left", 0) < len(selected):
             raise ValueError("insufficient practice sessions for the requested complete batch")
-        manifest.update(seed=seed, selection=args.selection, quota_before=quota,
+        manifest.update(seed=seed, selection=("case" if args.case_id else args.selection),
+                        requested_case_id=args.case_id, quota_before=quota,
+                        experiment_flags={
+                            "UNIFIED_RISKIER": os.environ.get("UNIFIED_RISKIER", "0"),
+                            "UNIFIED_BOLDER_OPENING": os.environ.get("UNIFIED_BOLDER_OPENING", "0"),
+                            "UNIFIED_OPENING_DISCOUNT_PCT": os.environ.get(
+                                "UNIFIED_OPENING_DISCOUNT_PCT", "15 (default)"
+                            ),
+                            "UNIFIED_ADAPTIVE_OPENING": os.environ.get("UNIFIED_ADAPTIVE_OPENING", "0"),
+                            "UNIFIED_ADAPTIVE_OPENING_V2": os.environ.get("UNIFIED_ADAPTIVE_OPENING_V2", "0"),
+                            "UNIFIED_RESPONSE_TRADE_MENU": os.environ.get("UNIFIED_RESPONSE_TRADE_MENU", "0"),
+                            "UNIFIED_PROACTIVE_PRICE_EVIDENCE": os.environ.get(
+                                "UNIFIED_PROACTIVE_PRICE_EVIDENCE", "0"
+                            ),
+                            "SUPPLIER_ECONOMICS": os.environ.get("SUPPLIER_ECONOMICS", "0"),
+                        },
                         population=[case["case_id"] for case in eligible],
                         selected=[case["case_id"] for case in selected])
         write_json(args.out / "run.json", manifest)  # Persist before the first POST.
         print(json.dumps({"seed": seed, "selected": manifest["selected"]}), flush=True)
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=min(3, len(selected))) as pool:
             futures = [pool.submit(hosted_run, client, factory, case, args.out) for case in selected]
             records = [future.result() for future in as_completed(futures)]
         client.http.close()

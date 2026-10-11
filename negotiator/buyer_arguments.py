@@ -49,7 +49,14 @@ def source_document_reply(events, records):
     )}
 
 
-def price_evidence_reply(case, supplier_id, events, package=None):
+def price_evidence_reply(case, supplier_id, events, package=None, *, proactive=False):
+    """Cite safe price history on request, or proactively on the opening counter.
+
+    Proactive use prefers a lower case-referenced quote. Otherwise it requires two
+    recent, distinct same-supplier POs that are each at least 1% below the current
+    quote. Historical prices are transactions, not supplier cost floors or proof
+    of identical terms.
+    """
     supplier_message = next((event for event in reversed(events) if event.get("from") not in {"buyer", "arena"}), {})
     body = str(supplier_message.get("body") or "")
     evidence = r"(?:data|evidence|basis|justif\w*|support\w*|benchmark\w*)"
@@ -63,7 +70,7 @@ def price_evidence_reply(case, supplier_id, events, package=None):
                          r"(?:send|provide|share)|we (?:ask|request|need|require)|what|which)\b", sentence, re.I)
         if asks and re.search(rf"{evidence}.{{0,80}}{price}|{price}.{{0,80}}{evidence}|{direct}", sentence, re.I):
             requests.append(sentence)
-    if not requests:
+    if not requests and not proactive:
         return None
     parts = case.get("parts") or []
     # Ambiguous multi-part scope is not comparable enough for a numeric citation.
@@ -99,24 +106,52 @@ def price_evidence_reply(case, supplier_id, events, package=None):
         except (TypeError, ValueError):
             continue
         if dated <= cutoff:
-            (quotes if is_quote else orders).append((dated, ref, value))
+            (quotes if is_quote else orders).append((dated, ref, value, metadata))
     current = (supplier_message.get("term_sheets") or [{}])[0].get("terms", {}).get("unit_price", 0)
     quotes = [row for row in quotes if row[2] < current]
     if quotes:
-        dated, ref, value = min(quotes, key=lambda row: row[2])
+        dated, ref, value, _metadata = min(quotes, key=lambda row: row[2])
         return {"refs": [ref], "kind": "case_quote", "text": (
             f"The case's reference quote {ref} lists EUR {value:g} per one unit for this part. "
             "Its other commercial terms may differ; this is price context, not your cost floor. "
-            "Our attached price remains a proposal for the complete package, subject to your approval."
+            "Please review our complete proposal against this reference and let us know the best "
+            "package you can approve."
         )}
-    if len(orders) >= 2:
-        chosen = sorted(orders, reverse=True)[:2]
+    if proactive:
+        # A single old transaction is weak leverage. Require two distinct recent
+        # purchase orders, each materially below the quote, and never substitute
+        # another supplier's order history.
+        if not isinstance(current, (int, float)) or isinstance(current, bool) or not math.isfinite(current):
+            return None
+        eligible = [row for row in orders if row[2] <= current * 0.99]
+        chosen, seen_orders = [], set()
+        for row in sorted(eligible, key=lambda item: item[0], reverse=True):
+            po_number = row[3].get("po_number") or row[1]
+            if po_number in seen_orders:
+                continue
+            seen_orders.add(po_number)
+            chosen.append(row)
+            if len(chosen) == 2:
+                break
+        if len(chosen) < 2:
+            return None
+    elif len(orders) >= 2:
+        chosen = sorted(orders, key=lambda item: item[0], reverse=True)[:2]
+    else:
+        chosen = []
+    if chosen:
         refs = [row[1] for row in chosen]
+        facts_text = " and ".join(
+            f"EUR {row[2]:g} per unit on {row[0].isoformat()} ({row[1]})" for row in chosen
+        )
         return {"refs": refs, "kind": "purchase_order_history", "text": (
-            f"Our purchase-order price history for this same part is recorded in {refs[0]} and {refs[1]}. "
-            "Those are previous transaction prices, not an assertion about your current costs or identical terms. "
-            "Please consider our proposed package against that history and indicate what you can approve."
+            f"Our recent purchase orders for this same part record {facts_text}. These are prior "
+            "transaction prices; their volumes or other terms may differ, and they are not a claim "
+            "about your costs. Please review our complete proposal against this history and tell us "
+            "the best package you can approve."
         )}
+    if proactive:
+        return None
     return {"refs": [], "kind": "commercial_proposal", "text": (
         "Regarding the basis for our target: this is a commercial proposal, not a claim about your costs. "
         "We have no verified comparable price benchmark to cite here. Please indicate the package you can approve."

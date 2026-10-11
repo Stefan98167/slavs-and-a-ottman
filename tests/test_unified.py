@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from test_kit import CASE
 
 from arena_kit.agents import AdvancedAgent, PackageAgent, UnifiedAgent
@@ -47,11 +48,168 @@ def test_unified_agent_applies_and_cites_bounded_supplier_cost_claim_on_opening_
     out = agent.decide(CASE, threads)
 
     prices = [sheet["terms"]["unit_price"] for sheet in out["message"]["term_sheets"]]
-    assert prices[0] == 40.74  # 5% ask softened by the 2-point cap
+    assert prices[0] == 36.54  # 15% standard ask softened by the 2-point cap
     assert agent.decision_history[-1]["supplier_claimed_cost_impact_pct"] == 2.0
     assert "Your email states: LCI-C rose 50 % in twelve months and is 80 % of our cost." in out["message"]["body"]
     assert agent.decision_history[-1]["claim_adjustment_cap_pct"] == 2.0
     assert "percentage points" not in out["message"]["body"]
+
+
+def test_bolder_opening_flag_asks_for_larger_but_reservation_safe_discount(monkeypatch):
+    monkeypatch.setenv("UNIFIED_BOLDER_OPENING", "1")
+    monkeypatch.delenv("UNIFIED_OPENING_DISCOUNT_PCT", raising=False)
+    agent = UnifiedAgent()
+
+    out = agent.decide(CASE, {"sup:test": [supplier("open", 42.0)]})
+
+    terms = out["message"]["term_sheets"][0]["terms"]
+    assert terms["unit_price"] == 33.6  # The optional 20% ask vs. the standard 15% ask.
+    assert set(terms) == set(CASE["negotiable"])
+    assert agent.decision_history[-1]["bolder_opening_enabled"] is True
+    assert agent.decision_history[-1]["effective_max_discount_pct"] == 20.0
+    assert agent.decision_history[-1]["best_package_total_cost"] <= agent.decision_history[-1]["reservation_cost"]
+
+
+def test_bolder_opening_flag_is_off_by_default(monkeypatch):
+    monkeypatch.delenv("UNIFIED_BOLDER_OPENING", raising=False)
+    monkeypatch.delenv("UNIFIED_OPENING_DISCOUNT_PCT", raising=False)
+    monkeypatch.delenv("UNIFIED_ADAPTIVE_OPENING", raising=False)
+    monkeypatch.delenv("UNIFIED_ADAPTIVE_OPENING_V2", raising=False)
+
+    agent = UnifiedAgent()
+    out = agent.decide(CASE, {"sup:test": [supplier("open", 42.0)]})
+
+    assert out["message"]["term_sheets"][0]["terms"]["unit_price"] == 35.7
+    assert agent.decision_history[-1]["bolder_opening_enabled"] is False
+    assert agent.adaptive_opening_enabled is False
+    assert agent.decision_history[-1]["effective_max_discount_pct"] == 15.0
+
+
+def test_opening_discount_override_sets_exact_fifteen_percent(monkeypatch):
+    for name in ("UNIFIED_BOLDER_OPENING", "UNIFIED_ADAPTIVE_OPENING", "UNIFIED_ADAPTIVE_OPENING_V2"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("UNIFIED_OPENING_DISCOUNT_PCT", "15")
+
+    agent = UnifiedAgent()
+    out = agent.decide(CASE, {"sup:test": [supplier("open", 42.0)]})
+
+    assert out["message"]["term_sheets"][0]["terms"]["unit_price"] == 35.7
+    assert agent.decision_history[-1]["effective_max_discount_pct"] == 15.0
+    assert agent.opening_discount_override_enabled
+
+
+def test_adaptive_opening_classifies_observed_supplier_behavior(monkeypatch):
+    monkeypatch.delenv("UNIFIED_BOLDER_OPENING", raising=False)
+    monkeypatch.delenv("UNIFIED_OPENING_DISCOUNT_PCT", raising=False)
+    monkeypatch.delenv("UNIFIED_ADAPTIVE_OPENING_V2", raising=False)
+    monkeypatch.setenv("UNIFIED_ADAPTIVE_OPENING", "1")
+    agent = UnifiedAgent()
+
+    opening = {**supplier("open", 60.0), "from": "sup:test"}
+    buyer_move = {"from": "buyer", "term_sheets": [{"terms": {"unit_price": 51.0}}]}
+    conceded = {**supplier("open", 59.0), "from": "sup:test"}
+    held = {**supplier("open", 60.0), "from": "sup:test"}
+
+    assert agent._opening_discount_for_events([opening]) == (
+        15.0,
+        {"response": "initial_or_unobserved", "supplier_price_move_pct": None,
+         "reciprocal_concession_share": 0.5},
+    )
+    discount, response = agent._opening_discount_for_events([opening, buyer_move, conceded])
+    assert discount == 8.0
+    assert response["response"] == "supplier_conceded_price"
+    assert response["supplier_price_move_pct"] == pytest.approx(-1.67)
+    assert response["reciprocal_concession_share"] == 0.8
+
+    discount, response = agent._opening_discount_for_events([opening, buyer_move, held])
+    assert discount == 20.0
+    assert response["response"] == "supplier_held_or_raised_price"
+    assert response["reciprocal_concession_share"] == 0.0
+
+
+def test_adaptive_opening_applies_reciprocal_share_to_counter(monkeypatch):
+    monkeypatch.delenv("UNIFIED_BOLDER_OPENING", raising=False)
+    monkeypatch.delenv("UNIFIED_OPENING_DISCOUNT_PCT", raising=False)
+    monkeypatch.delenv("UNIFIED_ADAPTIVE_OPENING_V2", raising=False)
+    monkeypatch.setenv("UNIFIED_ADAPTIVE_OPENING", "1")
+    agent = UnifiedAgent()
+    first = {"sup:test": [supplier("open", 42.0)]}
+
+    initial = agent.decide(CASE, first)
+    first["sup:test"].extend([
+        {"from": "buyer", "status": "open", "term_sheets": initial["message"]["term_sheets"]},
+        supplier("open", 41.0),
+    ])
+    counter = agent.decide(CASE, first)
+
+    assert counter["message"]["term_sheets"]
+    assert agent.decision_history[-1]["adaptive_supplier_response"]["response"] == "supplier_conceded_price"
+    assert agent.decision_history[-1]["effective_max_discount_pct"] == 8.0
+    previous_ask = initial["message"]["term_sheets"][0]["terms"]["unit_price"]
+    adaptive_ask = counter["message"]["term_sheets"][0]["terms"]["unit_price"]
+    assert previous_ask < adaptive_ask < 41.0
+
+
+def test_bolder_and_adaptive_openings_cannot_be_enabled_together(monkeypatch):
+    monkeypatch.setenv("UNIFIED_BOLDER_OPENING", "1")
+    monkeypatch.setenv("UNIFIED_ADAPTIVE_OPENING", "1")
+    monkeypatch.delenv("UNIFIED_ADAPTIVE_OPENING_V2", raising=False)
+    monkeypatch.delenv("UNIFIED_OPENING_DISCOUNT_PCT", raising=False)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        UnifiedAgent()
+
+
+def test_second_adaptive_strategy_scales_giveback_to_supplier_concession(monkeypatch):
+    for name in ("UNIFIED_BOLDER_OPENING", "UNIFIED_ADAPTIVE_OPENING", "UNIFIED_OPENING_DISCOUNT_PCT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("UNIFIED_ADAPTIVE_OPENING_V2", "1")
+    agent = UnifiedAgent()
+    opening = {**supplier("open", 42.0), "from": "sup:test"}
+    buyer_move = {"from": "buyer", "term_sheets": [{"terms": {"unit_price": 35.7}}]}
+
+    discount, response = agent._opening_discount_for_events(
+        [opening, buyer_move, {**supplier("open", 41.5), "from": "sup:test"}]
+    )
+    assert discount == 15.0
+    assert response["response"] == "supplier_conceded_modestly"
+    assert response["reciprocal_concession_share"] == 0.5
+
+    discount, response = agent._opening_discount_for_events(
+        [opening, buyer_move, {**supplier("open", 41.0), "from": "sup:test"}]
+    )
+    assert discount == 15.0
+    assert response["response"] == "supplier_conceded_strongly"
+    assert response["reciprocal_concession_share"] == 0.25
+
+    discount, response = agent._opening_discount_for_events(
+        [opening, buyer_move, {**supplier("open", 42.0), "from": "sup:test"}]
+    )
+    assert discount == 20.0
+    assert response["response"] == "supplier_held_or_raised_price"
+    assert response["reciprocal_concession_share"] == 0.0
+
+
+def test_second_adaptive_strategy_propagates_to_live_counteroffer(monkeypatch):
+    for name in ("UNIFIED_BOLDER_OPENING", "UNIFIED_ADAPTIVE_OPENING", "UNIFIED_OPENING_DISCOUNT_PCT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("UNIFIED_ADAPTIVE_OPENING_V2", "1")
+    agent = UnifiedAgent()
+    threads = {"sup:test": [supplier("open", 42.0)]}
+
+    first = agent.decide(CASE, threads)
+    threads["sup:test"].extend([
+        {"from": "buyer", "status": "open", "term_sheets": first["message"]["term_sheets"]},
+        supplier("open", 41.0),
+    ])
+    counter = agent.decide(CASE, threads)
+
+    assert counter["message"]["term_sheets"]
+    assert agent.decision_history[-1]["adaptive_opening_v2_enabled"] is True
+    assert agent.decision_history[-1]["adaptive_supplier_response"]["response"] == "supplier_conceded_strongly"
+    previous_ask = first["message"]["term_sheets"][0]["terms"]["unit_price"]
+    next_ask = counter["message"]["term_sheets"][0]["terms"]["unit_price"]
+    assert previous_ask < next_ask < 41.0
 
 
 def test_unified_consumes_jonas_profile_from_live_supplier_email():
@@ -138,7 +296,7 @@ def test_unified_agent_filters_profile_trade_through_must_haves(monkeypatch):
 
 
 def test_unified_agent_does_not_send_packages_above_the_fallback_reservation():
-    case = {**CASE, "buyer": {**CASE["buyer"], "fallback_unit_price": 39.0}}
+    case = {**CASE, "buyer": {**CASE["buyer"], "fallback_unit_price": 33.0}}
     agent = UnifiedAgent()
 
     out = agent.decide(case, {"sup:A": [supplier("open", 42.0)]})
@@ -228,7 +386,7 @@ def test_unified_agent_accepts_an_acceptable_offer_after_no_progress_on_hold():
 
 
 def test_unified_agent_repackages_only_after_supplier_improves_and_claim_is_opening_only():
-    agent = UnifiedAgent(claim_adjustment_cap_pct=2)
+    agent = UnifiedAgent(max_discount_pct=5.0, claim_adjustment_cap_pct=2)
     events = [supplier("open", 42.0, body="LCI-C rose 50 % in twelve months and is 80 % of our cost.")]
     first = agent.decide(CASE, {"sup:A": events})
     assert first["message"]["term_sheets"][0]["terms"]["unit_price"] == 40.74
@@ -429,7 +587,7 @@ def test_unified_accepts_global_best_when_remaining_proposals_cannot_improve_it(
 
 
 def test_unified_stops_when_even_the_proposal_would_save_less_than_threshold():
-    agent = UnifiedAgent(claim_adjustment_cap_pct=2, minimum_rounds=0)
+    agent = UnifiedAgent(max_discount_pct=5.0, claim_adjustment_cap_pct=2, minimum_rounds=0)
     events = [supplier("open", 42.0, body="LCI-C rose 50 % in twelve months and is 80 % of our cost.")]
     first = agent.decide(CASE, {"sup:A": events})
     events.extend([{**first["message"], "from": "buyer"}, supplier("open", 40.8)])
@@ -461,7 +619,7 @@ def test_supported_quality_guarantee_is_explained_as_a_concrete_trade():
             "term_options": {**CASE["term_options"], "ppm_commitment": [100, 500, 1200]}}
     opening = supplier("open", 42, body="We guarantee a defect rate below 500 ppm.")
     opening["term_sheets"][0]["terms"]["ppm_commitment"] = 1200
-    out = UnifiedAgent().decide(case, {"sup:A": [opening]})
+    out = UnifiedAgent(max_discount_pct=5.0).decide(case, {"sup:A": [opening]})
     assert "pairs your stated quality guarantee" in out["message"]["body"]
     assert {s["terms"]["ppm_commitment"] for s in out["message"]["term_sheets"]} == {500}
     assert len(out["message"]["term_sheets"]) == 1

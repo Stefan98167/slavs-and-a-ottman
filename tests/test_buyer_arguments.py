@@ -51,6 +51,62 @@ def test_latest_quote_and_case_cutoff_and_no_repeated_fact():
     assert price_evidence_reply(case, "sup:A", [supplier("open", 42)]) is None
 
 
+def test_opening_price_argument_uses_two_recent_distinct_lower_same_supplier_orders():
+    case = {**CASE, "as_of": "2026-09-30", "facts": {
+        "po:old": quote(unit_price=37.0, date="2026-01-01"),
+        "po:new": quote(unit_price=38.0, date="2026-08-01"),
+        "po:duplicate": quote(unit_price=39.0, date="2026-08-02"),
+        "po:other-supplier": quote(supplier="sup:B", unit_price=20.0),
+        "po:other-part": quote(part="part:other", unit_price=20.0),
+    }}
+    events = [supplier("open", 41.0)]
+
+    out = price_evidence_reply(case, "sup:A", events, proactive=True)
+
+    assert out["kind"] == "purchase_order_history"
+    assert out["refs"] == ["po:duplicate", "po:new"]
+    assert "EUR 39 per unit on 2026-08-02" in out["text"]
+    assert "not a claim about your costs" in out["text"]
+
+
+def test_opening_price_argument_skips_weak_or_non_comparable_history():
+    events = [supplier("open", 41.0)]
+    one_order = {**CASE, "facts": {"po:one": quote(unit_price=30.0)}}
+    too_close = {**CASE, "facts": {
+        "po:first": quote(unit_price=40.8), "po:second": quote(unit_price=40.9, date="2026-02-01")}}
+    assert price_evidence_reply(one_order, "sup:A", events, proactive=True) is None
+    assert price_evidence_reply(too_close, "sup:A", events, proactive=True) is None
+    assert price_evidence_reply(CASE, "sup:A", events, proactive=True) is None
+
+
+def test_unified_cites_qualifying_purchase_history_in_first_counter_only(monkeypatch):
+    monkeypatch.setenv("UNIFIED_PROACTIVE_PRICE_EVIDENCE", "1")
+    case = {**CASE, "facts": {
+        "po:first": quote(unit_price=37.0),
+        "po:second": quote(unit_price=38.0, date="2026-02-01"),
+    }}
+    agent = UnifiedAgent()
+    first = agent.decide(case, {"sup:A": [supplier("open", 41.0)]})
+    assert set(first["message"]["refs"]) == {"po:first", "po:second"}
+    assert "recent purchase orders" in first["message"]["body"]
+
+    later_events = [supplier("open", 41.0), {**first["message"], "from": "buyer"},
+                    supplier("open", 40.0)]
+    second = agent.decide(case, {"sup:A": later_events})
+    assert not set(second["message"].get("refs", [])) & {"po:first", "po:second"}
+
+
+def test_unified_proactive_price_evidence_is_off_by_default(monkeypatch):
+    monkeypatch.delenv("UNIFIED_PROACTIVE_PRICE_EVIDENCE", raising=False)
+    case = {**CASE, "facts": {
+        "po:first": quote(unit_price=37.0),
+        "po:second": quote(unit_price=38.0, date="2026-02-01"),
+    }}
+    decision = UnifiedAgent().decide(case, {"sup:A": [supplier("open", 41.0)]})
+    assert not decision["message"].get("refs")
+    assert "recent purchase orders" not in decision["message"]["body"]
+
+
 def test_partial_material_share_disclosure_is_still_a_refusal_of_more_details():
     agent = UnifiedAgent()
     out = agent.decide(CASE, {"sup:A": [supplier("open", 42, body=(
